@@ -35,7 +35,22 @@ public class RunnerTest : MonoBehaviour
                 target.runner.Run(target.data7);
             if (GUILayout.Button("Play Invoke"))
                 target.runner.Run(target.data8);
-            if (GUILayout.Button("Play Animation"))
+            if (GUILayout.Button("Play Invokes"))
+            {
+                var delay1 = 1.11111f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":1 " + Time.frameCount + ", " + delay1) }, delay1);
+                var delay2 = 1.11112f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":2 " + Time.frameCount + ", " + delay2) }, delay2);
+                var delay3 = 1.11114f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":3 " + Time.frameCount + ", " + delay3) }, delay3);
+                var delay4 = 1.11113f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":4 " + Time.frameCount + ", " + delay4) }, delay4);
+                var delay5 = 1.11110f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":5 " + Time.frameCount + ", " + delay5) }, delay5);
+                var delay6 = 1.111115f;
+                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":6 " + Time.frameCount + ", " + delay6) }, delay6);
+            }
+            if (GUILayout.Button("Play Group"))
             {
                 var group = new Runner.GroupClipData();
                 group.Add(target.data1, target.data1Delay);
@@ -82,7 +97,7 @@ public class RunnerTest : MonoBehaviour
 
     private void Start()
     {
-        data8.invoke = () => Debug.Log(Time.frameCount + ": data7 invoke");
+        data8.invoke = () => Debug.Log(Time.frameCount + ": data8 invoke");
         runner.Run(data0);
     }
 

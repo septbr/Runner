@@ -9,9 +9,9 @@ public class Runner : MonoBehaviour
 {
     [Min(0f)]
     public float Speed = 1;
-    private Director director;
+    private RunnerDirector director;
 
-    private void Awake() => director = Director.Create(name);
+    private void Awake() => director = RunnerDirector.Create(name);
     private void Update() => director.Evaluate(Time.deltaTime * Speed);
     private void OnDestroy() => director.Destroy();
 
@@ -24,18 +24,18 @@ public class Runner : MonoBehaviour
         public static RunnerGraph Create(string name) => new RunnerGraph(name);
     }
 
-    private class Director : PlayableBehaviour
+    private class RunnerDirector : PlayableBehaviour
     {
         private RunnerGraph graph;
         private List<Node> nodes = new List<Node>();
         private FrameInvoker invoker = new FrameInvoker();
 
-        public static Director Create(string name)
+        public static RunnerDirector Create(string name)
         {
             var graph = RunnerGraph.Create(name);
             graph.playableGraph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
             var output = ScriptPlayableOutput.Create(graph.playableGraph, "RunnerDirectorOutput");
-            var playable = ScriptPlayable<Director>.Create(graph.playableGraph);
+            var playable = ScriptPlayable<RunnerDirector>.Create(graph.playableGraph);
             output.SetSourcePlayable(playable);
             var director = playable.GetBehaviour();
             director.graph = graph;
@@ -71,15 +71,19 @@ public class Runner : MonoBehaviour
             foreach (var node in nodes)
             {
                 float deltaTime = info.deltaTime;
+                float progress = 0;
                 if (node.delay > 0)
                 {
                     node.delay -= deltaTime;
 
                     if (node.delay <= 0)
+                    {
                         deltaTime = -node.delay;
+                        progress = (info.deltaTime - deltaTime) / info.deltaTime;
+                    }
                 }
                 if (node.delay <= 0)
-                    FrameScheduler.Running(node.clip, graph, deltaTime, invoker);
+                    FrameScheduler.Running(node.clip, graph, deltaTime, progress, invoker);
             }
         }
         public override void ProcessFrame(Playable playable, FrameData info, object playerData)
@@ -121,8 +125,8 @@ public class Runner : MonoBehaviour
         private class FrameScheduler : RunnerClip
         {
             private FrameScheduler(RunnerClipData data) : base(data) => throw new NotImplementedException();
-            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, IInvoker invoker)
-                => Scheduler.Running(clip, graph, deltaTime, invoker);
+            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+                => Scheduler.Running(clip, graph, deltaTime, progress, invoker);
         }
     }
     public interface IInvoker
@@ -130,33 +134,8 @@ public class Runner : MonoBehaviour
         void Invoke(float time, Action handle);
     }
 
-    public enum Ease
-    {
-        Linear = 0,
-        InSine,
-        OutSine,
-        InOutSine,
-        InQuad,
-        OutQuad,
-        InOutQuad,
-        InCubic,
-        OutCubic,
-        InOutCubic,
-        InQuart,
-        OutQuart,
-        InOutQuart,
-        InQuint,
-        OutQuint,
-        InOutQuint,
-        InExpo,
-        OutExpo,
-        InOutExpo,
-        InCirc,
-        OutCirc,
-        InOutCirc,
-    }
     public delegate float EaseFunction(float t);
-    public static class EaseToFunction
+    public static class Ease
     {
         public static readonly EaseFunction Linear = t => t;
         public static readonly EaseFunction InSine = t => 0f - (float)Math.Cos((double)(t * 1.57079637f)) + 1f;
@@ -180,35 +159,6 @@ public class Runner : MonoBehaviour
         public static readonly EaseFunction InCirc = t => 0f - ((float)Math.Sqrt((double)(1f - t * t)) - 1f);
         public static readonly EaseFunction OutCirc = t => (float)Math.Sqrt((double)(1f - (t = t - 1f) * t));
         public static readonly EaseFunction InOutCirc = t => (t *= 2f) < 1f ? -0.5f * ((float)Math.Sqrt((double)(1f - t * t)) - 1f) : 0.5f * ((float)Math.Sqrt((double)(1f - (t -= 2f) * t)) + 1f);
-        public static EaseFunction Get(Ease ease)
-        {
-            switch (ease)
-            {
-                case Ease.Linear: return Linear;
-                case Ease.InSine: return InSine;
-                case Ease.OutSine: return OutSine;
-                case Ease.InOutSine: return InOutSine;
-                case Ease.InQuad: return InQuad;
-                case Ease.OutQuad: return OutQuad;
-                case Ease.InOutQuad: return InOutQuad;
-                case Ease.InCubic: return InCubic;
-                case Ease.OutCubic: return OutCubic;
-                case Ease.InOutCubic: return InOutCubic;
-                case Ease.InQuart: return InQuart;
-                case Ease.OutQuart: return OutQuart;
-                case Ease.InOutQuart: return InOutQuart;
-                case Ease.InQuint: return InQuint;
-                case Ease.OutQuint: return OutQuint;
-                case Ease.InOutQuint: return InOutQuint;
-                case Ease.InExpo: return InExpo;
-                case Ease.OutExpo: return OutExpo;
-                case Ease.InOutExpo: return InOutExpo;
-                case Ease.InCirc: return InCirc;
-                case Ease.OutCirc: return OutCirc;
-                case Ease.InOutCirc: return InOutCirc;
-            }
-            return null;
-        }
     }
 
     [Serializable]
@@ -230,7 +180,7 @@ public class Runner : MonoBehaviour
 
     public class RunnerClip
     {
-        protected RunnerClipData Data { get; }
+        protected readonly RunnerClipData Data;
         protected float Elapsed { get; private set; }
 
         public RunState State { get; protected set; }
@@ -249,21 +199,26 @@ public class Runner : MonoBehaviour
             State = RunState.Running;
             return true;
         }
-        protected virtual float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected virtual float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            float stepTime = 0;
+            float subProgress = -1;
             if (State == RunState.None)
                 Run(graph);
 
             if (State == RunState.Running)
             {
-                Elapsed += stepTime = deltaTime * Data.speed;
+                deltaTime *= Data.speed;
+                Elapsed += deltaTime;
 
+                subProgress = 1;
                 if (Elapsed >= Data.duration)
+                {
+                    subProgress = (deltaTime + Data.duration - Elapsed) / deltaTime;
                     State = RunState.Done;
+                }
             }
             // Debug.Log(Time.frameCount + ": " + this.GetType() + " Running: " + deltaTime + ", " + Elapsed);
-            return stepTime;
+            return subProgress;
         }
         public virtual bool DestroyIf(RunState state)
         {
@@ -282,19 +237,19 @@ public class Runner : MonoBehaviour
         public enum RunState { None, Running, Done, Destroyed }
         protected static class Scheduler
         {
-            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, IInvoker invoker)
+            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
             {
                 if (deltaTime >= 0)
                 {
-                    // Debug.Log(Time.frameCount + ": Scheduler Running: " + deltaTime);
-                    clip.Running(graph, deltaTime, invoker);
+                    // Debug.Log(Time.frameCount + ": Scheduler Running: " + progress + ", " + deltaTime);
+                    clip.Running(graph, deltaTime, progress, invoker);
                 }
             }
         }
     }
     private class RunnerClip<T> : RunnerClip where T : RunnerClipData
     {
-        protected new T Data { get; }
+        protected new readonly T Data;
 
         public RunnerClip(T data) : base(data) => Data = base.Data as T;
     }
@@ -308,12 +263,13 @@ public class Runner : MonoBehaviour
 
         public override bool Verify()
         {
-            duration = float.PositiveInfinity;
+            duration = 0;
             foreach (var child in children)
             {
                 child.delay = Mathf.Max(child.delay, 0);
                 if (!child.data.Verify())
                     return false;
+                duration = Mathf.Max(duration, child.delay + child.data.duration / child.data.speed);
             }
             return base.Verify();
         }
@@ -336,35 +292,32 @@ public class Runner : MonoBehaviour
                 children.Add(new Child { delay = child.delay, clip = child.data.CreateClip() });
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
-            bool isAllDone = true;
             foreach (var child in children)
             {
                 if (child.clip.State == RunState.Done || child.clip.State == RunState.Destroyed)
                     continue;
 
                 var childDeltaTime = deltaTime;
+                var childProgress = progress;
                 if (child.delay > 0)
                 {
                     child.delay -= childDeltaTime;
-
                     if (child.delay <= 0)
+                    {
                         childDeltaTime = -child.delay;
+                        childProgress = progress + (1 - progress) * (deltaTime - childDeltaTime) / deltaTime;
+                    }
                 }
                 if (child.delay <= 0)
-                    Scheduler.Running(child.clip, graph, deltaTime, invoker);
-
-                if (child.clip.State == RunState.None || child.clip.State == RunState.Running)
-                    isAllDone = false;
+                    Scheduler.Running(child.clip, graph, childDeltaTime, childProgress, invoker);
             }
-            if (isAllDone)
-                State = RunState.Done;
 
-            return stepTime;
+            return subProgress;
         }
         public override bool DestroyIf(RunState state)
         {
@@ -393,7 +346,7 @@ public class Runner : MonoBehaviour
         [Min(0)]
         public float from = 0;
         [Min(0)]
-        public float to = float.MaxValue;
+        public float to = float.PositiveInfinity;
         [Min(0)]
         public float transition = 5;
         [Range(-1000, 1000)]
@@ -413,7 +366,7 @@ public class Runner : MonoBehaviour
             frameSpeeds.RemoveAll(x => x.value == 0 || x.frame < 0 || x.frame >= frameCount || (x.frame == 0 && x.value == 1));
             frameSpeeds.Sort((x, y) => x.frame.CompareTo(y.frame));
 
-            duration = ending == Ending.None ? Len(from, to) / speed : float.MaxValue;
+            duration = ending == Ending.None ? Len(from, to) / speed : float.PositiveInfinity;
 
             return base.Verify();
         }
@@ -510,18 +463,18 @@ public class Runner : MonoBehaviour
             playable = Playable.Create(graph, this);
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
             var lastState = State;
             var lastExiting = exiting;
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             var frame = Data.To(Data.from, Data.ending == AnimationClipData.Ending.Loop ? Elapsed % cycleDuration : Elapsed);
             exiting = Data.ending == AnimationClipData.Ending.None && frame + Data.transition > Data.to;
             playable.SetFrame(this, frame, State != lastState, exiting != lastExiting);
             // Debug.Log(Time.frameCount + ": SetTime: " + to + "," + time);
-            return stepTime;
+            return subProgress;
         }
         public override void Destroy()
         {
@@ -762,10 +715,10 @@ public class Runner : MonoBehaviour
             }
             _activator?.Invoke(active);
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             if (active != (State == RunState.Running))
             {
@@ -774,7 +727,7 @@ public class Runner : MonoBehaviour
                 particleSystemPlayable?.Stop();
             }
             particleSystemPlayable?.SetTime(Elapsed);
-            return stepTime;
+            return subProgress;
         }
 
         private class ParticleSystemPlayable
@@ -866,7 +819,7 @@ public class Runner : MonoBehaviour
         public override bool Verify()
         {
             if (!audioSource || !audioClip) return false;
-            duration = loop ? float.MaxValue : audioClip.samples / audioClip.frequency;
+            duration = loop ? float.PositiveInfinity : audioClip.samples / audioClip.frequency;
             return base.Verify();
         }
         public override RunnerClip CreateClip() => new SoundClip(this);
@@ -892,13 +845,13 @@ public class Runner : MonoBehaviour
             }
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             playable.SetTime(Data.loop ? Elapsed % cycleDuration : Elapsed);
-            return stepTime;
+            return subProgress;
         }
         public override void Destroy()
         {
@@ -1025,7 +978,7 @@ public class Runner : MonoBehaviour
     {
         public Transform target;
         public List<Place> path = new List<Place>();
-        public Ease ease;
+        public EaseFunction ease;
         public bool isLocal;
         public bool isCurve;
 
@@ -1038,8 +991,7 @@ public class Runner : MonoBehaviour
                     path.RemoveAt(i--);
             }
 
-            if (!target || path.Count == 0 || path.Exists(p => (p.lookAtType == Place.LookAtType.Transform && !(p.lookAtValue is Transform))
-                || (p.lookAtType == Place.LookAtType.Position && !(p.lookAtValue is Vector3))))
+            if (!target || path.Count == 0 || path.Exists(p => (p.lookAtType == Place.LookAtType.Transform && !p.lookAtTransform)))
                 return false;
             return base.Verify();
         }
@@ -1052,7 +1004,8 @@ public class Runner : MonoBehaviour
 
             public Vector3 position;
             public LookAtType lookAtType = LookAtType.None;
-            public object lookAtValue;
+            public Vector3 lookAtPosition;
+            public Transform lookAtTransform;
             public Vector3 lookAtUp = Vector3.up;
         }
     }
@@ -1076,14 +1029,14 @@ public class Runner : MonoBehaviour
             navigation = new Navigation(navigationPath, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
-            var ease = EaseToFunction.Get(Data.ease);
-            var et = ease != null ? ease(t) : t;
+            var ease = Data.ease ?? Ease.Linear;
+            var et = ease(t);
             if (Data.isLocal) Data.target.localPosition = navigation.Lerp(et);
             else Data.target.position = navigation.Lerp(et);
             // Debug.Log(Time.frameCount + ": position: " + Data.target.position + ", localPosition: " + Data.target.localPosition + ", time: " + et);
@@ -1093,9 +1046,9 @@ public class Runner : MonoBehaviour
             {
                 var forward = Vector3.zero;
                 if (place.lookAtType == MoveClipData.Place.LookAtType.Transform)
-                    forward = ((Transform)place.lookAtValue).position - Data.target.position;
+                    forward = place.lookAtTransform.position - Data.target.position;
                 else if (place.lookAtType == MoveClipData.Place.LookAtType.Position)
-                    forward = (Vector3)(place.lookAtValue) - (Data.isLocal ? Data.target.localPosition : Data.target.position);
+                    forward = place.lookAtPosition - (Data.isLocal ? Data.target.localPosition : Data.target.position);
                 else
                     forward = t > 0.999f ? navigation.Lerp(ease(1)) - navigation.Lerp(ease(0.999f)) : navigation.Lerp(ease(t + 0.001f)) - navigation.Lerp(ease(t));
 
@@ -1105,7 +1058,7 @@ public class Runner : MonoBehaviour
 #if UNITY_EDITOR
             navigation.Trace(Data.target.parent);
 #endif
-            return stepTime;
+            return subProgress;
         }
     }
 
@@ -1114,7 +1067,7 @@ public class Runner : MonoBehaviour
     {
         public Transform target;
         public List<Vector3> path = new List<Vector3>();
-        public Ease ease;
+        public EaseFunction ease;
         public bool isLocal;
         public bool isCurve;
 
@@ -1150,19 +1103,18 @@ public class Runner : MonoBehaviour
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
-            var ease = EaseToFunction.Get(Data.ease);
-            var et = ease != null ? ease(t) : t;
+            var et = Data.ease != null ? Data.ease(t) : t;
             if (Data.isLocal)
                 Data.target.localEulerAngles = navigation.Lerp(et);
             else
                 Data.target.eulerAngles = navigation.Lerp(et);
-            return stepTime;
+            return subProgress;
         }
     }
 
@@ -1171,7 +1123,7 @@ public class Runner : MonoBehaviour
     {
         public Transform target;
         public List<Vector3> path = new List<Vector3>();
-        public Ease ease;
+        public EaseFunction ease;
         public bool isCurve;
 
         public override bool Verify()
@@ -1205,16 +1157,15 @@ public class Runner : MonoBehaviour
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
-            var ease = EaseToFunction.Get(Data.ease);
-            var et = ease != null ? ease(t) : t;
+            var et = Data.ease != null ? Data.ease(t) : t;
             Data.target.localScale = navigation.Lerp(et);
-            return stepTime;
+            return subProgress;
         }
     }
 
@@ -1222,7 +1173,7 @@ public class Runner : MonoBehaviour
     public class ValueClipData<T> : RunnerClipData
     {
         public T from, to;
-        public Ease ease;
+        public EaseFunction ease;
         public Action<object> setter;
 
         public override bool Verify()
@@ -1252,18 +1203,17 @@ public class Runner : MonoBehaviour
     private class ValueClip<T> : RunnerClip<ValueClipData<T>>
     {
         public ValueClip(ValueClipData<T> data) : base(data) { }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
-            var ease = EaseToFunction.Get(Data.ease);
-            var et = ease != null ? ease(t) : t;
+            var et = Data.ease != null ? Data.ease(t) : t;
 
             var value = ValueClipData<T>.Lerp(Data.from, Data.to, et);
-            Data.setter(value);
-            return stepTime;
+            invoker.Invoke(progress, () => Data.setter(value));
+            return subProgress;
         }
     }
 
@@ -1271,19 +1221,24 @@ public class Runner : MonoBehaviour
     public class InvokerClipData : RunnerClipData
     {
         public Action invoke;
+
+        public override bool Verify()
+        {
+            speed = 1;
+            return base.Verify();
+        }
         public override RunnerClip CreateClip() => new InvokerClip(this);
     }
     private class InvokerClip : RunnerClip<InvokerClipData>
     {
         public InvokerClip(InvokerClipData data) : base(data) { }
-        protected override float Running(RunnerGraph graph, float deltaTime, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
-            var stepTime = base.Running(graph, deltaTime, invoker);
-            if (stepTime <= 0) return stepTime;
+            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            if (subProgress < 0) return subProgress;
 
-            if (State == RunState.Running || State == RunState.Done)
-                invoker.Invoke(deltaTime, Data.invoke);
-            return stepTime;
+            invoker.Invoke(progress, Data.invoke);
+            return subProgress;
         }
     }
 }
