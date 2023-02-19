@@ -106,13 +106,59 @@ public class Runner : MonoBehaviour
         public readonly PlayableGraph playableGraph;
         private RunnerGraph(string name) => playableGraph = PlayableGraph.Create(name);
         public static RunnerGraph Create(string name) => new RunnerGraph(name);
+
+        private List<Tuple<float, Action>> invokers = new List<Tuple<float, Action>>();
+        public void Invoke(float progress, Action invoke)
+        {
+            var pos = invokers.Count;
+            for (var index = 0; index < invokers.Count; index++)
+            {
+                if (progress < invokers[index].Item1)
+                {
+                    pos = index;
+                    break;
+                }
+            }
+            invokers.Insert(pos, new Tuple<float, Action>(progress, invoke));
+        }
+        public void InvokeClear() => invokers.Clear();
+        public void InvokeImmediate()
+        {
+            foreach (var invoker in invokers)
+            {
+                try
+                {
+                    invoker.Item2();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError(Time.frameCount + ": " + e);
+                }
+            }
+            invokers.Clear();
+        }
+
+        private List<Action> cleanups = new List<Action>();
+        public void Clean(Action cleanup)
+        {
+            if (!cleanups.Contains(cleanup))
+                cleanups.Add(cleanup);
+        }
+        public void CleanClear() => invokers.Clear();
+        public void CleanImmediate()
+        {
+            foreach (var cleanup in cleanups)
+            {
+                cleanup();
+            }
+            cleanups.Clear();
+        }
     }
 
     private class RunnerDirector : PlayableBehaviour
     {
         private RunnerGraph graph;
         private List<Node> nodes = new List<Node>();
-        private FrameInvoker invoker = new FrameInvoker();
 
         public static RunnerDirector Create(string name)
         {
@@ -140,13 +186,16 @@ public class Runner : MonoBehaviour
             return clip;
         }
 
-        public void Evaluate(float time) => graph.playableGraph.Evaluate(time);
+        public void Evaluate(float time)
+        {
+            graph.playableGraph.Evaluate(time);
+            graph.CleanImmediate();
+        }
         public void Destroy()
         {
             foreach (var node in nodes)
                 node.clip.Destroy();
             nodes.Clear();
-            invoker.Clear();
             graph.playableGraph.Destroy();
         }
 
@@ -167,12 +216,12 @@ public class Runner : MonoBehaviour
                     }
                 }
                 if (node.delay <= 0)
-                    FrameScheduler.Running(node.clip, graph, deltaTime, progress, invoker);
+                    FrameScheduler.Running(node.clip, graph, deltaTime, progress);
             }
         }
         public override void ProcessFrame(Playable playable, FrameData info, object playerData)
         {
-            invoker.InvokeImmediate();
+            graph.InvokeImmediate();
             for (var index = 0; index < nodes.Count; index++)
             {
                 var clip = nodes[index].clip;
@@ -182,35 +231,11 @@ public class Runner : MonoBehaviour
         }
 
         private class Node { public float delay; public RunnerClip clip; }
-        private class FrameInvoker : IInvoker
-        {
-            private List<Tuple<float, Action>> invokers = new List<Tuple<float, Action>>();
-            public void Invoke(float progress, Action invoke)
-            {
-                var pos = invokers.Count;
-                for (var index = 0; index < invokers.Count; index++)
-                {
-                    if (progress < invokers[index].Item1)
-                    {
-                        pos = index;
-                        break;
-                    }
-                }
-                invokers.Insert(pos, new Tuple<float, Action>(progress, invoke));
-            }
-            public void Clear() => invokers.Clear();
-            public void InvokeImmediate()
-            {
-                foreach (var invoker in invokers)
-                    invoker.Item2();
-                invokers.Clear();
-            }
-        }
         private class FrameScheduler : RunnerClip
         {
             private FrameScheduler(RunnerClipData data) : base(data) => throw new NotImplementedException();
-            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
-                => Scheduler.Running(clip, graph, deltaTime, progress, invoker);
+            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress)
+                => Scheduler.Running(clip, graph, deltaTime, progress);
         }
     }
     public interface IInvoker
@@ -283,7 +308,7 @@ public class Runner : MonoBehaviour
             State = RunState.Running;
             return true;
         }
-        protected virtual float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected virtual float Running(RunnerGraph graph, float deltaTime, float progress)
         {
             float subProgress = -1;
             if (State == RunState.None)
@@ -321,12 +346,12 @@ public class Runner : MonoBehaviour
         public enum RunState { None, Running, Done, Destroyed }
         protected static class Scheduler
         {
-            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+            public static void Running(RunnerClip clip, RunnerGraph graph, float deltaTime, float progress)
             {
                 if (deltaTime >= 0)
                 {
                     // Debug.Log(Time.frameCount + ": Scheduler Running: " + progress + ", " + deltaTime);
-                    clip.Running(graph, deltaTime, progress, invoker);
+                    clip.Running(graph, deltaTime, progress);
                 }
             }
         }
@@ -489,9 +514,9 @@ public class Runner : MonoBehaviour
 
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0) return subProgress;
 
             foreach (var child in children)
@@ -511,10 +536,10 @@ public class Runner : MonoBehaviour
                     }
                 }
                 if (child.delay <= 0)
-                    Scheduler.Running(child.clip, graph, childDeltaTime, childProgress, invoker);
+                    Scheduler.Running(child.clip, graph, childDeltaTime, childProgress);
             }
             if (State == RunState.Done && Data.onCompleted != null)
-                invoker.Invoke(progress + (1 - progress) * subProgress, Data.onCompleted);
+                graph.Invoke(progress + (1 - progress) * subProgress, Data.onCompleted);
 
             return subProgress;
         }
@@ -660,23 +685,23 @@ public class Runner : MonoBehaviour
         protected override bool Run(RunnerGraph graph)
         {
             var res = base.Run(graph);
-            if (!res) return false;
+            if (!res || !Data.animator) return res;
 
             cycleDuration = Data.Len(Data.from, Data.to) / Data.speed;
             exiting = false;
             playable = Playable.Create(graph, this);
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
             var lastState = State;
             var lastExiting = exiting;
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || playable == null) return subProgress;
 
             var frame = Data.To(Data.from, Data.ending == AnimationClipData.Ending.Loop ? Elapsed % cycleDuration : Elapsed);
             exiting = Data.ending == AnimationClipData.Ending.None && frame + Data.transition > Data.to;
-            playable.SetFrame(this, frame, State != lastState, exiting != lastExiting);
+            playable.SetFrame(this, Mathf.Min(frame, Data.to), State != lastState, exiting != lastExiting);
             // Debug.Log(Time.frameCount + ": SetTime: " + to + "," + time);
             return subProgress;
         }
@@ -834,7 +859,7 @@ public class Runner : MonoBehaviour
                     // Debug.Log(Time.frameCount + ": SetInputWeight: " + index + ", " + weight + ", " + states[index].weight + ", " + states[index].weightTo);
                 }
             }
-            public void Destroy(AnimationClip runnerClip)
+            private void DestroyImmediate(AnimationClip runnerClip)
             {
                 for (var index = 0; index < states.Count; index++)
                 {
@@ -864,6 +889,7 @@ public class Runner : MonoBehaviour
                     }
                 }
             }
+            public void Destroy(AnimationClip runnerClip) => graph.Clean(() => DestroyImmediate(runnerClip));
 
             private class PlayableState
             {
@@ -897,6 +923,8 @@ public class Runner : MonoBehaviour
         private Action<bool> _activator;
         public ActiveClip(ActiveClipData data) : base(data)
         {
+            if (!Data.target) return;
+
             if (Data.target is GameObject || Data.target is Transform)
             {
                 var gameObject = Data.target is GameObject ? (GameObject)Data.target : ((Transform)Data.target).gameObject;
@@ -923,10 +951,10 @@ public class Runner : MonoBehaviour
             }
             _activator?.Invoke(active);
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || !Data.target) return subProgress;
 
             if (active != (State == RunState.Running))
             {
@@ -972,7 +1000,6 @@ public class Runner : MonoBehaviour
             }
             public void SetTime(float time)
             {
-                if (!gameObject.activeInHierarchy) return;
                 foreach (var state in states)
                 {
                     bool dirty = false, restart = true;
@@ -1054,10 +1081,10 @@ public class Runner : MonoBehaviour
             }
             return res;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || playable == null) return subProgress;
 
             playable.SetTime(Data.from + (Data.loop ? Elapsed % (Data.to - Data.from) : Elapsed));
             return subProgress;
@@ -1081,6 +1108,8 @@ public class Runner : MonoBehaviour
             private Playable() { }
             public static Playable Create(RunnerGraph graph, SoundClip runnerClip)
             {
+                if (!runnerClip.Data.audioSource) return null;
+
                 var playable = new Playable();
                 playable.graph = graph;
                 playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
@@ -1089,11 +1118,12 @@ public class Runner : MonoBehaviour
                 return playable;
             }
             public void SetTime(float time) => playable.SetTime(time);
-            public void Destroy()
+            private void DestroyImmediate()
             {
                 graph.playableGraph.DestroyPlayable(playable);
                 graph.playableGraph.DestroyOutput(output);
             }
+            public void Destroy() => graph.Clean(() => DestroyImmediate());
         }
     }
     private class Navigation
@@ -1264,7 +1294,7 @@ public class Runner : MonoBehaviour
         protected override bool Run(RunnerGraph graph)
         {
             var res = base.Run(graph);
-            if (!res) return false;
+            if (!res || !Data.target) return res;
 
             path = new List<MoveClipData.Place>(Data.path);
             path.Insert(0, new MoveClipData.Place { position = Data.isLocal ? Data.target.localPosition : Data.target.position });
@@ -1274,10 +1304,10 @@ public class Runner : MonoBehaviour
             navigation = new Navigation(navigationPath, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || !Data.target) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
             var ease = Data.ease ?? Ease.Linear;
@@ -1287,7 +1317,7 @@ public class Runner : MonoBehaviour
             // Debug.Log(Time.frameCount + ": position: " + Data.target.position + ", localPosition: " + Data.target.localPosition + ", time: " + et);
 
             var place = path[(int)((path.Count - 1) * et)];
-            if (place.lookAtType != MoveClipData.Place.LookAtType.None)
+            if (place.lookAtType != MoveClipData.Place.LookAtType.None && (place.lookAtType != MoveClipData.Place.LookAtType.Transform || place.lookAtTransform))
             {
                 var forward = Vector3.zero;
                 if (place.lookAtType == MoveClipData.Place.LookAtType.Transform)
@@ -1339,17 +1369,17 @@ public class Runner : MonoBehaviour
         protected override bool Run(RunnerGraph graph)
         {
             var res = base.Run(graph);
-            if (!res) return false;
+            if (!res || !Data.target) return res;
 
             var path = new List<Vector3>(Data.path);
             path.Insert(0, Data.isLocal ? Data.target.localEulerAngles : Data.target.eulerAngles);
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || !Data.target) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
             var et = Data.ease != null ? Data.ease(t) : t;
@@ -1392,17 +1422,17 @@ public class Runner : MonoBehaviour
         protected override bool Run(RunnerGraph graph)
         {
             var res = base.Run(graph);
-            if (!res) return false;
+            if (!res || !Data.target) return res;
 
             var path = new List<Vector3>(Data.path);
             path.Insert(0, Data.target.localScale);
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
-            if (subProgress < 0) return subProgress;
+            var subProgress = base.Running(graph, deltaTime, progress);
+            if (subProgress < 0 || !Data.target) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
             var et = Data.ease != null ? Data.ease(t) : t;
@@ -1445,16 +1475,16 @@ public class Runner : MonoBehaviour
     private class ValueClip<T> : RunnerClip<ValueClipData<T>> where T : struct
     {
         public ValueClip(ValueClipData<T> data) : base(data) { }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0) return subProgress;
 
             var t = Mathf.Clamp01(Elapsed / Data.duration);
             var et = Data.ease != null ? Data.ease(t) : t;
 
             var value = ValueClipData<T>.Lerp(Data.from, Data.to, et);
-            invoker.Invoke(progress, () => Data.setter(value));
+            graph.Invoke(progress, () => Data.setter(value));
             return subProgress;
         }
     }
@@ -1474,12 +1504,12 @@ public class Runner : MonoBehaviour
     private class InvokeClip : RunnerClip<InvokeClipData>
     {
         public InvokeClip(InvokeClipData data) : base(data) { }
-        protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
+        protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
-            var subProgress = base.Running(graph, deltaTime, progress, invoker);
+            var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0) return subProgress;
 
-            invoker.Invoke(progress, Data.invoke);
+            graph.Invoke(progress, Data.invoke);
             return subProgress;
         }
     }
