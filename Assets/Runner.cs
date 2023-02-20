@@ -1076,7 +1076,7 @@ public class Runner : MonoBehaviour
             var unepeatedLocations = new List<Vector3>();
             foreach (var position in locations)
             {
-                if (position != unepeatedLocations[unepeatedLocations.Count - 1])
+                if (unepeatedLocations.Count == 0 || position != unepeatedLocations[unepeatedLocations.Count - 1])
                     unepeatedLocations.Add(position);
             }
             path = unepeatedLocations.ToArray();
