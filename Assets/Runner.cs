@@ -15,7 +15,7 @@ public class Runner : MonoBehaviour
     private void Update() => director.Evaluate(Time.deltaTime * Speed);
     private void OnDestroy() => director.Destroy();
 
-    public RunnerClip Run(RunnerClipData data, float delay = 0) => director.Run(data, delay);
+    public RunnerClip Run(float delay, RunnerClipData data) => director.Run(delay, data);
 
     public class RunnerGraph
     {
@@ -43,7 +43,7 @@ public class Runner : MonoBehaviour
             return director;
         }
 
-        public RunnerClip Run(RunnerClipData data, float delay = 0)
+        public RunnerClip Run(float delay, RunnerClipData data)
         {
             if (!data.Verify())
             {
@@ -259,7 +259,86 @@ public class Runner : MonoBehaviour
     {
         public List<Child> children = new List<Child>();
 
-        public void Add(RunnerClipData data, float delay = 0) => children.Add(new Child { delay = delay, data = data });
+        public void Add(float delay, RunnerClipData data) => children.Add(new Child { delay = delay, data = data });
+        public Runner.AnimationClipData Animation(float delay, Animator animator, UnityEngine.AnimationClip animation, float from = 0, float to = float.PositiveInfinity)
+        {
+            var data = new Runner.AnimationClipData
+            {
+                animator = animator,
+                animation = animation,
+                from = from,
+                to = to,
+            };
+            Add(delay, data);
+            return data;
+        }
+        public Runner.ActiveClipData Active(float delay, UnityEngine.Object target, float duration)
+        {
+            var data = new Runner.ActiveClipData
+            {
+                target = target,
+                duration = duration,
+            };
+            Add(delay, data);
+            return data;
+        }
+        public Runner.MoveClipData Move(float delay, Transform target, Vector3[] path, float duration)
+        {
+            var data = new Runner.MoveClipData
+            {
+                target = target,
+                duration = duration,
+            };
+            foreach (var position in path)
+                data.path.Add(new Runner.MoveClipData.Place { position = position });
+
+            Add(delay, data);
+            return data;
+        }
+        public Runner.RotateClipData Rotate(float delay, Transform target, Vector3[] path, float duration)
+        {
+            var data = new Runner.RotateClipData
+            {
+                target = target,
+                path = new List<Vector3>(path),
+                duration = duration,
+            };
+            Add(delay, data);
+            return data;
+        }
+        public Runner.ScaleClipData Scale(float delay, Transform target, Vector3[] path, float duration)
+        {
+            var data = new Runner.ScaleClipData
+            {
+                target = target,
+                path = new List<Vector3>(path),
+                duration = duration,
+            };
+            Add(delay, data);
+            return data;
+        }
+        public Runner.ValueClipData<T> Value<T>(float delay, T from, T to, Action<T> setter, float duration)
+        {
+            var data = new Runner.ValueClipData<T>
+            {
+                from = from,
+                to = to,
+                setter = setter,
+                duration = duration,
+            };
+            Add(delay, data);
+            return data;
+        }
+        public Runner.InvokeClipData Invoke(float delay, Action invoke, float duration = 0)
+        {
+            var data = new Runner.InvokeClipData
+            {
+                invoke = invoke,
+                duration = duration,
+            };
+            Add(delay, data);
+            return data;
+        }
 
         public override bool Verify()
         {
@@ -1174,7 +1253,7 @@ public class Runner : MonoBehaviour
     {
         public T from, to;
         public EaseFunction ease;
-        public Action<object> setter;
+        public Action<T> setter;
 
         public override bool Verify()
         {
@@ -1218,7 +1297,7 @@ public class Runner : MonoBehaviour
     }
 
     [Serializable]
-    public class InvokerClipData : RunnerClipData
+    public class InvokeClipData : RunnerClipData
     {
         public Action invoke;
 
@@ -1227,11 +1306,11 @@ public class Runner : MonoBehaviour
             speed = 1;
             return base.Verify();
         }
-        public override RunnerClip CreateClip() => new InvokerClip(this);
+        public override RunnerClip CreateClip() => new InvokeClip(this);
     }
-    private class InvokerClip : RunnerClip<InvokerClipData>
+    private class InvokeClip : RunnerClip<InvokeClipData>
     {
-        public InvokerClip(InvokerClipData data) : base(data) { }
+        public InvokeClip(InvokeClipData data) : base(data) { }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
         {
             var subProgress = base.Running(graph, deltaTime, progress, invoker);

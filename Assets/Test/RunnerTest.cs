@@ -20,48 +20,48 @@ public class RunnerTest : MonoBehaviour
             var target = this.target as RunnerTest;
 
             if (GUILayout.Button("Play Animation"))
-                target.runner.Run(target.data1);
+                target.runner.Run(0, target.data1);
             if (GUILayout.Button("Play Active"))
-                target.runner.Run(target.data2);
+                target.runner.Run(0, target.data2);
             if (GUILayout.Button("Play Sound"))
-                target.runner.Run(target.data3);
+                target.runner.Run(0, target.data3);
             if (GUILayout.Button("Play Move"))
-                target.runner.Run(target.data4);
+                target.runner.Run(0, target.data4);
             if (GUILayout.Button("Play Rotate"))
-                target.runner.Run(target.data5);
+                target.runner.Run(0, target.data5);
             if (GUILayout.Button("Play Scale"))
-                target.runner.Run(target.data6);
+                target.runner.Run(0, target.data6);
             if (GUILayout.Button("Play Value"))
-                target.runner.Run(target.data7);
+                target.runner.Run(0, target.data7);
             if (GUILayout.Button("Play Invoke"))
-                target.runner.Run(target.data8);
+                target.runner.Run(0, target.data8);
             if (GUILayout.Button("Play Invokes"))
             {
                 var delay1 = 1.11111f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":1 " + Time.frameCount + ", " + delay1) }, delay1);
+                target.runner.Run(delay1, new Runner.InvokeClipData { invoke = () => print(target.name + ":1 " + Time.frameCount + ", " + delay1) });
                 var delay2 = 1.11112f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":2 " + Time.frameCount + ", " + delay2) }, delay2);
+                target.runner.Run(delay2, new Runner.InvokeClipData { invoke = () => print(target.name + ":2 " + Time.frameCount + ", " + delay2) });
                 var delay3 = 1.11114f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":3 " + Time.frameCount + ", " + delay3) }, delay3);
+                target.runner.Run(delay3, new Runner.InvokeClipData { invoke = () => print(target.name + ":3 " + Time.frameCount + ", " + delay3) });
                 var delay4 = 1.11113f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":4 " + Time.frameCount + ", " + delay4) }, delay4);
+                target.runner.Run(delay4, new Runner.InvokeClipData { invoke = () => print(target.name + ":4 " + Time.frameCount + ", " + delay4) });
                 var delay5 = 1.11110f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":5 " + Time.frameCount + ", " + delay5) }, delay5);
+                target.runner.Run(delay5, new Runner.InvokeClipData { invoke = () => print(target.name + ":5 " + Time.frameCount + ", " + delay5) });
                 var delay6 = 1.111115f;
-                target.runner.Run(new Runner.InvokerClipData { invoke = () => print(target.name + ":6 " + Time.frameCount + ", " + delay6) }, delay6);
+                target.runner.Run(delay6, new Runner.InvokeClipData { invoke = () => print(target.name + ":6 " + Time.frameCount + ", " + delay6) });
             }
             if (GUILayout.Button("Play Group"))
             {
                 var group = new Runner.GroupClipData();
-                group.Add(target.data1, target.data1Delay);
-                group.Add(target.data2, target.data2Delay);
-                group.Add(target.data3, target.data3Delay);
-                group.Add(target.data4, target.data4Delay);
-                group.Add(target.data5, target.data5Delay);
-                group.Add(target.data6, target.data6Delay);
-                group.Add(target.data7, target.data7Delay);
-                group.Add(target.data8, target.data8Delay);
-                target.runner.Run(group);
+                group.Add(target.data1Delay, target.data1);
+                group.Add(target.data2Delay, target.data2);
+                group.Add(target.data3Delay, target.data3);
+                group.Add(target.data4Delay, target.data4);
+                group.Add(target.data5Delay, target.data5);
+                group.Add(target.data6Delay, target.data6);
+                group.Add(target.data7Delay, target.data7);
+                group.Add(target.data8Delay, target.data8);
+                target.runner.Run(0, group);
             }
         }
     }
@@ -93,12 +93,12 @@ public class RunnerTest : MonoBehaviour
     public Runner.ValueClipData<float> data7;
     public float data8Delay = 0;
     [SerializeField]
-    public Runner.InvokerClipData data8;
+    public Runner.InvokeClipData data8;
 
     private void Start()
     {
         data8.invoke = () => Debug.Log(Time.frameCount + ": data8 invoke");
-        runner.Run(data0);
+        runner.Run(0, data0);
     }
 
     [ContextMenu("VerifyAllData")]
