@@ -87,7 +87,7 @@ public class Runner : MonoBehaviour
         };
         return Run(delay, data);
     }
-    public RunnerClip Value<T>(float delay, T from, T to, Action<T> setter, float duration)
+    public RunnerClip Value<T>(float delay, T from, T to, Action<T> setter, float duration) where T : struct
     {
         var data = new ValueClipData<T>
         {
@@ -445,7 +445,7 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public ValueClipData<T> Value<T>(float delay, T from, T to, Action<T> setter, float duration)
+        public ValueClipData<T> Value<T>(float delay, T from, T to, Action<T> setter, float duration) where T : struct
         {
             var data = new ValueClipData<T>
             {
@@ -1387,7 +1387,7 @@ public class Runner : MonoBehaviour
     }
 
     [Serializable]
-    public class ValueClipData<T> : RunnerClipData
+    public class ValueClipData<T> : RunnerClipData where T : struct
     {
         public T from, to;
         public EaseFunction ease;
@@ -1403,7 +1403,7 @@ public class Runner : MonoBehaviour
         public static readonly Func<T, T, float, T> Lerp = Lerpper.Lerp<T>();
         private static class Lerpper
         {
-            private static class Impl<U> { public static Func<U, U, float, U> lerp; }
+            private static class Impl<U> where U : struct { public static Func<U, U, float, U> lerp; }
             static Lerpper()
             {
                 Impl<float>.lerp = Mathf.Lerp;
@@ -1414,10 +1414,10 @@ public class Runner : MonoBehaviour
                 Impl<Color32>.lerp = Color32.Lerp;
                 Impl<Quaternion>.lerp = Quaternion.Lerp;
             }
-            public static Func<U, U, float, U> Lerp<U>() => Impl<U>.lerp;
+            public static Func<U, U, float, U> Lerp<U>() where U : struct => Impl<U>.lerp;
         }
     }
-    private class ValueClip<T> : RunnerClip<ValueClipData<T>>
+    private class ValueClip<T> : RunnerClip<ValueClipData<T>> where T : struct
     {
         public ValueClip(ValueClipData<T> data) : base(data) { }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
