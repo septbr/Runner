@@ -1073,35 +1073,45 @@ public class Runner : MonoBehaviour
 
         public Navigation(List<Vector3> locations, bool isCurve = false)
         {
-            Debug.Assert(locations.Count > 1, Time.frameCount + ": Expecting at least 2 points");
-
-            path = locations.ToArray();
+            var unepeatedLocations = new List<Vector3>();
+            foreach (var position in locations)
+            {
+                if (position != unepeatedLocations[unepeatedLocations.Count - 1])
+                    unepeatedLocations.Add(position);
+            }
+            path = unepeatedLocations.ToArray();
             this.isCurve = isCurve;
             length = 0;
 
-            if (isCurve)
+            if (path.Length > 1)
             {
-                var last = path[0];
-                for (float d = 0.001f, f = 0; f <= 1 + 2 * d; f += d)
+                if (isCurve)
                 {
-                    var curr = Lerp(f);
-                    length += Vector3.Distance(last, curr);
-                    last = curr;
+                    var last = path[0];
+                    for (float d = 0.001f, f = 0; f <= 1 + 2 * d; f += d)
+                    {
+                        var curr = Lerp(f);
+                        length += Vector3.Distance(last, curr);
+                        last = curr;
+                    }
                 }
-            }
-            else
-            {
-                slices = new float[path.Length - 1];
-                for (var i = 0; i < slices.Length; i++)
+                else
                 {
-                    var slice = Vector3.Distance(path[i], path[i + 1]);
-                    slices[i] = slice;
-                    length += slice;
+                    slices = new float[path.Length - 1];
+                    for (var i = 0; i < slices.Length; i++)
+                    {
+                        var slice = Vector3.Distance(path[i], path[i + 1]);
+                        slices[i] = slice;
+                        length += slice;
+                    }
                 }
             }
         }
         public Vector3 Lerp(float t)
         {
+            if (path.Length == 0) return Vector3.zero;
+            if (path.Length == 1) return path[0];
+
             if (isCurve)
             {
                 if (t < 0)
@@ -1224,8 +1234,7 @@ public class Runner : MonoBehaviour
             if (!res) return false;
 
             path = new List<MoveClipData.Place>(Data.path);
-            if ((Data.isLocal && path[0].position != Data.target.localPosition) || (!Data.isLocal && path[0].position != Data.target.position))
-                path.Insert(0, new MoveClipData.Place { position = Data.isLocal ? Data.target.localPosition : Data.target.position });
+            path.Insert(0, new MoveClipData.Place { position = Data.isLocal ? Data.target.localPosition : Data.target.position });
 
             var navigationPath = new List<Vector3>();
             foreach (var place in path) navigationPath.Add(place.position);
@@ -1300,9 +1309,7 @@ public class Runner : MonoBehaviour
             if (!res) return false;
 
             var path = new List<Vector3>(Data.path);
-            if ((Data.isLocal && path[0] != Data.target.localEulerAngles) || (!Data.isLocal && path[0] != Data.target.eulerAngles))
-                path.Insert(0, Data.isLocal ? Data.target.localEulerAngles : Data.target.eulerAngles);
-
+            path.Insert(0, Data.isLocal ? Data.target.localEulerAngles : Data.target.eulerAngles);
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
@@ -1355,8 +1362,7 @@ public class Runner : MonoBehaviour
             if (!res) return false;
 
             var path = new List<Vector3>(Data.path);
-            if (path[0] != Data.target.localScale)
-                path.Insert(0, Data.target.localScale);
+            path.Insert(0, Data.target.localScale);
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
