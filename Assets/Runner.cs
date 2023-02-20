@@ -282,6 +282,19 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
+        public SoundClipData Sound(float delay, AudioSource source, AudioClip clip, float from = 0, float to = float.PositiveInfinity)
+        {
+            var data = new SoundClipData
+            {
+                audioSource = source,
+                audioClip = clip,
+                from = from,
+                to = to,
+            };
+
+            Add(delay, data);
+            return data;
+        }
         public MoveClipData Move(float delay, Transform target, Vector3[] path, float duration)
         {
             var data = new MoveClipData
@@ -901,11 +914,19 @@ public class Runner : MonoBehaviour
     {
         public AudioSource audioSource;
         public AudioClip audioClip;
+
+        [Min(0)]
+        public float from = 0;
+        [Min(0)]
+        public float to = float.PositiveInfinity;
         public bool loop;
         public override bool Verify()
         {
             if (!audioSource || !audioClip) return false;
-            duration = loop ? float.PositiveInfinity : audioClip.samples / audioClip.frequency;
+            from = Mathf.Max(from, 0);
+            to = Mathf.Min(to, audioClip.samples / audioClip.frequency);
+
+            duration = loop ? float.PositiveInfinity : (to - from);
             return base.Verify();
         }
         public override RunnerClip CreateClip() => new SoundClip(this);
@@ -915,7 +936,6 @@ public class Runner : MonoBehaviour
         private RunnerGraph graph;
         private AudioPlayableOutput output;
         private AudioClipPlayable playable;
-        private float cycleDuration;
 
         public SoundClip(SoundClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
@@ -923,7 +943,6 @@ public class Runner : MonoBehaviour
             var res = base.Run(graph);
             if (res)
             {
-                cycleDuration = Data.audioClip.samples / Data.audioClip.frequency;
                 this.graph = graph;
                 output = AudioPlayableOutput.Create(graph.playableGraph, Data.audioSource.name, Data.audioSource);
                 playable = AudioClipPlayable.Create(graph.playableGraph, Data.audioClip, Data.loop);
@@ -936,7 +955,7 @@ public class Runner : MonoBehaviour
             var subProgress = base.Running(graph, deltaTime, progress, invoker);
             if (subProgress < 0) return subProgress;
 
-            playable.SetTime(Data.loop ? Elapsed % cycleDuration : Elapsed);
+            playable.SetTime(Data.from + (Data.loop ? Elapsed % (Data.to - Data.from) : Elapsed));
             return subProgress;
         }
         public override void Destroy()
