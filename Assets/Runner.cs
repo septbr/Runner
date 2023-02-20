@@ -260,9 +260,9 @@ public class Runner : MonoBehaviour
         public List<Child> children = new List<Child>();
 
         public void Add(float delay, RunnerClipData data) => children.Add(new Child { delay = delay, data = data });
-        public Runner.AnimationClipData Animation(float delay, Animator animator, UnityEngine.AnimationClip animation, float from = 0, float to = float.PositiveInfinity)
+        public AnimationClipData Animation(float delay, Animator animator, UnityEngine.AnimationClip animation, float from = 0, float to = float.PositiveInfinity)
         {
-            var data = new Runner.AnimationClipData
+            var data = new AnimationClipData
             {
                 animator = animator,
                 animation = animation,
@@ -272,9 +272,9 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public Runner.ActiveClipData Active(float delay, UnityEngine.Object target, float duration)
+        public ActiveClipData Active(float delay, UnityEngine.Object target, float duration)
         {
-            var data = new Runner.ActiveClipData
+            var data = new ActiveClipData
             {
                 target = target,
                 duration = duration,
@@ -282,22 +282,22 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public Runner.MoveClipData Move(float delay, Transform target, Vector3[] path, float duration)
+        public MoveClipData Move(float delay, Transform target, Vector3[] path, float duration)
         {
-            var data = new Runner.MoveClipData
+            var data = new MoveClipData
             {
                 target = target,
                 duration = duration,
             };
             foreach (var position in path)
-                data.path.Add(new Runner.MoveClipData.Place { position = position });
+                data.path.Add(new MoveClipData.Place { position = position });
 
             Add(delay, data);
             return data;
         }
-        public Runner.RotateClipData Rotate(float delay, Transform target, Vector3[] path, float duration)
+        public RotateClipData Rotate(float delay, Transform target, Vector3[] path, float duration)
         {
-            var data = new Runner.RotateClipData
+            var data = new RotateClipData
             {
                 target = target,
                 path = new List<Vector3>(path),
@@ -306,9 +306,9 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public Runner.ScaleClipData Scale(float delay, Transform target, Vector3[] path, float duration)
+        public ScaleClipData Scale(float delay, Transform target, Vector3[] path, float duration)
         {
-            var data = new Runner.ScaleClipData
+            var data = new ScaleClipData
             {
                 target = target,
                 path = new List<Vector3>(path),
@@ -317,9 +317,9 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public Runner.ValueClipData<T> Value<T>(float delay, T from, T to, Action<T> setter, float duration)
+        public ValueClipData<T> Value<T>(float delay, T from, T to, Action<T> setter, float duration)
         {
-            var data = new Runner.ValueClipData<T>
+            var data = new ValueClipData<T>
             {
                 from = from,
                 to = to,
@@ -329,9 +329,9 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public Runner.InvokeClipData Invoke(float delay, Action invoke, float duration = 0)
+        public InvokeClipData Invoke(float delay, Action invoke, float duration = 0)
         {
-            var data = new Runner.InvokeClipData
+            var data = new InvokeClipData
             {
                 invoke = invoke,
                 duration = duration,
