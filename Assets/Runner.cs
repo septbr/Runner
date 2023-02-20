@@ -101,18 +101,18 @@ public class Runner : MonoBehaviour
         private class FrameInvoker : IInvoker
         {
             private List<Tuple<float, Action>> invokers = new List<Tuple<float, Action>>();
-            public void Invoke(float time, Action invoke)
+            public void Invoke(float progress, Action invoke)
             {
                 var pos = invokers.Count;
                 for (var index = 0; index < invokers.Count; index++)
                 {
-                    if (time < invokers[index].Item1)
+                    if (progress < invokers[index].Item1)
                     {
                         pos = index;
                         break;
                     }
                 }
-                invokers.Insert(pos, new Tuple<float, Action>(time, invoke));
+                invokers.Insert(pos, new Tuple<float, Action>(progress, invoke));
             }
             public void Clear() => invokers.Clear();
             public void InvokeImmediate()
@@ -131,7 +131,7 @@ public class Runner : MonoBehaviour
     }
     public interface IInvoker
     {
-        void Invoke(float time, Action handle);
+        void Invoke(float progress, Action handle);
     }
 
     public delegate float EaseFunction(float t);
@@ -258,8 +258,25 @@ public class Runner : MonoBehaviour
     public class GroupClipData : RunnerClipData
     {
         public List<Child> children = new List<Child>();
+        public List<UnityEngine.Object> bindings = new List<UnityEngine.Object>();
+        public Action onCompleted;
 
         public void Add(float delay, RunnerClipData data) => children.Add(new Child { delay = delay, data = data });
+        public void Bind(UnityEngine.Object binding)
+        {
+            if (!bindings.Contains(binding))
+                bindings.Add(binding);
+        }
+
+        public GroupClipData Group(float delay, Action onCompleted = null)
+        {
+            var data = new GroupClipData
+            {
+                onCompleted = onCompleted,
+            };
+            Add(delay, data);
+            return data;
+        }
         public AnimationClipData Animation(float delay, Animator animator, UnityEngine.AnimationClip animation, float from = 0, float to = float.PositiveInfinity)
         {
             var data = new AnimationClipData
@@ -415,6 +432,8 @@ public class Runner : MonoBehaviour
                 if (child.delay <= 0)
                     Scheduler.Running(child.clip, graph, childDeltaTime, childProgress, invoker);
             }
+            if (State == RunState.Done && Data.onCompleted != null)
+                invoker.Invoke(progress + (1 - progress) * subProgress, Data.onCompleted);
 
             return subProgress;
         }
@@ -429,6 +448,8 @@ public class Runner : MonoBehaviour
         {
             foreach (var child in children)
                 child.clip.Destroy();
+            foreach (var binding in Data.bindings)
+                UnityEngine.Object.Destroy(binding);
             base.Destroy();
         }
         private class Child { public float delay; public RunnerClip clip; }
