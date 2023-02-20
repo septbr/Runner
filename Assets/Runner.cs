@@ -295,6 +295,13 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
+        public RotateClipData Rotate(float delay, Transform target, Quaternion[] path, float duration)
+        {
+            var vPath = new Vector3[path.Length];
+            for (var i = 0; i < path.Length; i++)
+                vPath[i] = path[i].eulerAngles;
+            return Rotate(delay, target, vPath, duration);
+        }
         public RotateClipData Rotate(float delay, Transform target, Vector3[] path, float duration)
         {
             var data = new RotateClipData
