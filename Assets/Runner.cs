@@ -473,6 +473,7 @@ public class Runner : MonoBehaviour
     private class GroupClip : RunnerClip<GroupClipData>
     {
         private List<Child> children = new List<Child>();
+        private List<UnityEngine.Object> bindings = new List<UnityEngine.Object>();
 
         public GroupClip(GroupClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
@@ -483,6 +484,9 @@ public class Runner : MonoBehaviour
             children.Clear();
             foreach (var child in Data.children)
                 children.Add(new Child { delay = child.delay, clip = child.data.CreateClip() });
+            bindings.Clear();
+            bindings.AddRange(Data.bindings);
+
             return res;
         }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress, IInvoker invoker)
@@ -525,8 +529,11 @@ public class Runner : MonoBehaviour
         {
             foreach (var child in children)
                 child.clip.Destroy();
-            foreach (var binding in Data.bindings)
+            children.Clear();
+            foreach (var binding in bindings)
                 UnityEngine.Object.Destroy(binding);
+            bindings.Clear();
+
             base.Destroy();
         }
         private class Child { public float delay; public RunnerClip clip; }
@@ -675,7 +682,11 @@ public class Runner : MonoBehaviour
         }
         public override void Destroy()
         {
-            playable.Destroy(this);
+            if (playable != null)
+            {
+                playable.Destroy(this);
+                playable = null;
+            }
             base.Destroy();
         }
 
@@ -831,11 +842,11 @@ public class Runner : MonoBehaviour
                     if (state.clip == runnerClip)
                     {
                         states.RemoveAt(index);
-                        state.playable.Destroy();
+                        graph.playableGraph.DestroyPlayable(state.playable);
 
                         if (states.Count == 0)
                         {
-                            mixer.Destroy();
+                            graph.playableGraph.DestroyPlayable(mixer);
                             graph.playableGraph.DestroyOutput(output);
                             playables.Remove(this);
                             return;
@@ -1031,9 +1042,7 @@ public class Runner : MonoBehaviour
     }
     private class SoundClip : RunnerClip<SoundClipData>
     {
-        private RunnerGraph graph;
-        private AudioPlayableOutput output;
-        private AudioClipPlayable playable;
+        private Playable playable;
 
         public SoundClip(SoundClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
@@ -1041,10 +1050,7 @@ public class Runner : MonoBehaviour
             var res = base.Run(graph);
             if (res)
             {
-                this.graph = graph;
-                output = AudioPlayableOutput.Create(graph.playableGraph, Data.audioSource.name, Data.audioSource);
-                playable = AudioClipPlayable.Create(graph.playableGraph, Data.audioClip, Data.loop);
-                output.SetSourcePlayable(playable);
+                playable = Playable.Create(graph, this);
             }
             return res;
         }
@@ -1058,9 +1064,36 @@ public class Runner : MonoBehaviour
         }
         public override void Destroy()
         {
-            playable.Destroy();
-            graph.playableGraph.DestroyOutput(output);
+            if (playable != null)
+            {
+                playable.Destroy();
+                playable = null;
+            }
             base.Destroy();
+        }
+
+        private class Playable
+        {
+            private RunnerGraph graph;
+            private AudioPlayableOutput output;
+            private AudioClipPlayable playable;
+
+            private Playable() { }
+            public static Playable Create(RunnerGraph graph, SoundClip runnerClip)
+            {
+                var playable = new Playable();
+                playable.graph = graph;
+                playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
+                playable.playable = AudioClipPlayable.Create(graph.playableGraph, runnerClip.Data.audioClip, runnerClip.Data.loop);
+                playable.output.SetSourcePlayable(playable.playable);
+                return playable;
+            }
+            public void SetTime(float time) => playable.SetTime(time);
+            public void Destroy()
+            {
+                graph.playableGraph.DestroyPlayable(playable);
+                graph.playableGraph.DestroyOutput(output);
+            }
         }
     }
     private class Navigation
