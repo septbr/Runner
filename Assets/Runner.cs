@@ -16,6 +16,97 @@ public class Runner : MonoBehaviour
     private void OnDestroy() => director.Destroy();
 
     public RunnerClip Run(float delay, RunnerClipData data) => director.Run(delay, data);
+    public RunnerClip Animation(float delay, Animator animator, UnityEngine.AnimationClip animation, float from = 0, float to = float.PositiveInfinity)
+    {
+        var data = new AnimationClipData
+        {
+            animator = animator,
+            animation = animation,
+            from = from,
+            to = to,
+        };
+        return Run(delay, data);
+    }
+    public RunnerClip Active(float delay, UnityEngine.Object target, float duration)
+    {
+        var data = new ActiveClipData
+        {
+            target = target,
+            duration = duration,
+        };
+        return Run(delay, data);
+    }
+    public RunnerClip Sound(float delay, AudioSource source, AudioClip clip, float from = 0, float to = float.PositiveInfinity)
+    {
+        var data = new SoundClipData
+        {
+            audioSource = source,
+            audioClip = clip,
+            from = from,
+            to = to,
+        };
+
+        return Run(delay, data);
+    }
+    public RunnerClip Move(float delay, Transform target, Vector3[] path, float duration)
+    {
+        var data = new MoveClipData
+        {
+            target = target,
+            duration = duration,
+        };
+        foreach (var position in path)
+            data.path.Add(new MoveClipData.Place { position = position });
+
+        return Run(delay, data);
+    }
+    public RunnerClip Rotate(float delay, Transform target, Quaternion[] path, float duration)
+    {
+        var vPath = new Vector3[path.Length];
+        for (var i = 0; i < path.Length; i++)
+            vPath[i] = path[i].eulerAngles;
+        return Rotate(delay, target, vPath, duration);
+    }
+    public RunnerClip Rotate(float delay, Transform target, Vector3[] path, float duration)
+    {
+        var data = new RotateClipData
+        {
+            target = target,
+            path = new List<Vector3>(path),
+            duration = duration,
+        };
+        return Run(delay, data);
+    }
+    public RunnerClip Scale(float delay, Transform target, Vector3[] path, float duration)
+    {
+        var data = new ScaleClipData
+        {
+            target = target,
+            path = new List<Vector3>(path),
+            duration = duration,
+        };
+        return Run(delay, data);
+    }
+    public RunnerClip Value<T>(float delay, T from, T to, Action<T> setter, float duration)
+    {
+        var data = new ValueClipData<T>
+        {
+            from = from,
+            to = to,
+            setter = setter,
+            duration = duration,
+        };
+        return Run(delay, data);
+    }
+    public RunnerClip Invoke(float delay, Action invoke, float duration = 0)
+    {
+        var data = new InvokeClipData
+        {
+            invoke = invoke,
+            duration = duration,
+        };
+        return Run(delay, data);
+    }
 
     public class RunnerGraph
     {
