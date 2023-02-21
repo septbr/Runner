@@ -286,7 +286,194 @@ public class Runner : MonoBehaviour
         }
         public virtual RunnerClip CreateClip() => new RunnerClip(this);
     }
+    private abstract class RunnerPlayable
+    {
+        protected static List<RunnerPlayable> playables = new List<RunnerPlayable>();
+        protected RunnerGraph graph;
+        protected UnityEngine.Object target;
+        protected PlayableOutput output;
+        protected Playable mixer;
 
+        protected abstract void DestroyImmediate(IMixRunnerClip runnerClip);
+        public abstract void Destroy(IMixRunnerClip runnerClip);
+        public static T Create<T>(RunnerGraph graph, IMixRunnerClip runnerClip) where T : RunnerPlayable, new()
+        {
+            T playable = null;
+            foreach (var p in playables)
+            {
+                if (p is T tp && p.graph == graph && p.target == runnerClip.Target)
+                {
+                    playable = tp;
+                    break;
+                }
+            }
+            if (playable == null)
+            {
+                playable = new T();
+                playables.Add(playable);
+            }
+            return playable;
+        }
+    }
+    private class RunnerPlayable<T> : RunnerPlayable where T : RunnerClip, IMixRunnerClip
+    {
+        protected List<PlayableState> states = new List<PlayableState>();
+
+        private void UpdateWeightTo()
+        {
+            const float LeftLimitWeight = -1000, RightLimitWeight = 1000;
+            bool hasRightLimit = false, hasRightCount = false, hasUpLeftLimit = false;
+            for (var index = 0; index < states.Count; index++)
+            {
+                var state = states[index];
+                var weightTo = state.clip.Exiting || state.clip.State != RunnerClip.RunState.Running ? 0 : state.clip.Weight;
+                if (weightTo != 0)
+                {
+                    if (weightTo >= RightLimitWeight)
+                    {
+                        hasRightLimit = true;
+                        break;
+                    }
+                    if (weightTo > 0)
+                        hasRightCount = true;
+                    else if (weightTo > LeftLimitWeight)
+                        hasUpLeftLimit = true;
+                }
+            }
+            for (var index = 0; index < states.Count; index++)
+            {
+                var state = states[index];
+                var weightTo = state.clip.Exiting || state.clip.State != RunnerClip.RunState.Running ? 0 : state.clip.Weight;
+                if (weightTo != 0)
+                {
+                    if (hasRightLimit)
+                        weightTo = weightTo >= RightLimitWeight ? 1 : 0;
+                    else if (hasRightCount)
+                        weightTo = weightTo > 0 ? weightTo : 0;
+                    else if (hasUpLeftLimit)
+                        weightTo = weightTo <= LeftLimitWeight ? 0 : weightTo + RightLimitWeight;
+                    else
+                        weightTo = 1;
+                }
+                state.weightTo = weightTo;
+            }
+        }
+        /// <summary>
+        /// 节点预设值为0, 节点权重也为0, 且节点预设值越高, 节点权重越高
+        /// 当有节点预设值>0时, <0的预设值节点权重都为0;
+        /// 当有节点预设值≥1000时, 其他<1000节点权重都为0;
+        /// 当有节点预设值≤-1000时, 节点权重为0;
+        /// 每个节点权重以渐变形式达到预设值平衡值, 平衡值和恒等于1。
+        /// 节点权重渐变时长固定1s, 当期望权重发生变化时, 重置渐变
+        /// </summary>
+        private void UpdateWeight(float deltaTime)
+        {
+            float weightTotal = 0;
+            for (var index = 0; index < states.Count; index++)
+            {
+                var state = states[index];
+                var weight = state.weightTo;
+                if (state.clip.Transition > 0 && state.weight != state.weightTo && state.transition == -1)
+                {
+                    state.transition = 0;
+                    state.weightFrom = state.weight;
+                }
+                if (state.transition != -1)
+                {
+                    state.transition += deltaTime;
+                    weight = Mathf.Lerp(state.weightFrom, state.weightTo, state.transition / state.clip.Transition);
+                    if (state.transition >= state.clip.Transition) state.transition = -1;
+                }
+
+                weightTotal += weight;
+                state.weight = weight;
+            }
+
+            for (var index = 0; index < states.Count; index++)
+            {
+                var weight = weightTotal > 0 ? states[index].weight / weightTotal : 0f;
+                mixer.SetInputWeight(index, weight);
+                // Debug.Log(Time.frameCount + ": SetInputWeight: " + index + ", " + weight + ", " + states[index].weight + ", " + states[index].weightTo);
+            }
+        }
+        protected virtual void SetTime(PlayableState state, float time) => state.playable.SetTime(time);
+        public void SetTime(IMixRunnerClip runnerClip, float time, bool playableStateChanged, bool exitingChanged)
+        {
+            foreach (var state in states)
+            {
+                if (state.clip == runnerClip)
+                {
+                    var lastTime = state.time;
+                    state.time = time;
+                    SetTime(state, time);
+
+                    var desiredWeightDirty = playableStateChanged || exitingChanged;
+                    if (desiredWeightDirty)
+                        UpdateWeightTo();
+
+                    if (desiredWeightDirty || state.transition != -1)
+                    {
+                        var deltaTime = time - lastTime;
+                        if (deltaTime < 0) deltaTime = time + runnerClip.To - lastTime;
+                        UpdateWeight(deltaTime);
+                    }
+                    return;
+                }
+            }
+        }
+        protected override void DestroyImmediate(IMixRunnerClip runnerClip)
+        {
+            for (var index = 0; index < states.Count; index++)
+            {
+                var state = states[index];
+                if (state.clip == runnerClip)
+                {
+                    states.RemoveAt(index);
+                    graph.playableGraph.DestroyPlayable(state.playable);
+
+                    if (states.Count == 0)
+                    {
+                        graph.playableGraph.DestroyPlayable(mixer);
+                        graph.playableGraph.DestroyOutput(output);
+                        playables.Remove(this);
+                        return;
+                    }
+
+                    for (; index < states.Count; index++)
+                    {
+                        mixer.DisconnectInput(index + 1);
+                        mixer.ConnectInput(index, states[index].playable, 0);
+                    }
+                    mixer.SetInputCount(states.Count);
+                    UpdateWeightTo();
+                    UpdateWeight(0);
+                    return;
+                }
+            }
+        }
+        public override void Destroy(IMixRunnerClip runnerClip) => graph.Clean(() => DestroyImmediate(runnerClip));
+
+        protected class PlayableState
+        {
+            public float time;
+            public float transition;
+            public float weight;
+            public float weightFrom;
+            public float weightTo;
+            public T clip;
+            public Playable playable;
+        }
+    }
+    private interface IMixRunnerClip
+    {
+        UnityEngine.Object Target { get; }
+        float From { get; }
+        float To { get; }
+        float Weight { get; }
+        float Transition { get; }
+        bool Exiting { get; }
+        RunnerClip.RunState State { get; }
+    }
     public class RunnerClip
     {
         protected readonly RunnerClipData Data;
@@ -674,12 +861,17 @@ public class Runner : MonoBehaviour
         [Serializable]
         public class FrameValue { public float frame; public float value; }
     }
-    private class AnimationClip : RunnerClip<AnimationClipData>
+    private class AnimationClip : RunnerClip<AnimationClipData>, IMixRunnerClip
     {
-        private Playable playable;
-        private float cycleDuration;
+        public UnityEngine.Object Target => Data.animator;
+        public float From => Data.from;
+        public float To => Data.to;
+        public float Weight => Data.weight;
+        public float Transition => Data.transition;
+        public bool Exiting { get; private set; }
 
-        private bool exiting;
+        private AnimationPlayable playable;
+        private float cycleDuration;
 
         public AnimationClip(AnimationClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
@@ -688,20 +880,21 @@ public class Runner : MonoBehaviour
             if (!res || !Data.animator) return res;
 
             cycleDuration = Data.Len(Data.from, Data.to) / Data.speed;
-            exiting = false;
-            playable = Playable.Create(graph, this);
+            Exiting = false;
+            playable = AnimationPlayable.Create(graph, this);
             return res;
         }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
             var lastState = State;
-            var lastExiting = exiting;
+            var lastExiting = Exiting;
             var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0 || playable == null) return subProgress;
 
             var frame = Data.To(Data.from, Data.ending == AnimationClipData.Ending.Loop ? Elapsed % cycleDuration : Elapsed);
-            exiting = Data.ending == AnimationClipData.Ending.None && frame + Data.transition > Data.to;
-            playable.SetFrame(this, Mathf.Min(frame, Data.to), State != lastState, exiting != lastExiting);
+            frame = Mathf.Min(frame, Data.to);
+            Exiting = Data.ending == AnimationClipData.Ending.None && frame + Data.transition > Data.to;
+            playable.SetTime(this, frame, State != lastState, Exiting != lastExiting);
             // Debug.Log(Time.frameCount + ": SetTime: " + to + "," + time);
             return subProgress;
         }
@@ -715,192 +908,29 @@ public class Runner : MonoBehaviour
             base.Destroy();
         }
 
-        private class Playable
+        private class AnimationPlayable : RunnerPlayable<AnimationClip>
         {
-            private static List<Playable> playables = new List<Playable>();
-
-            private RunnerGraph graph;
-            private AnimationPlayableOutput output;
-            private AnimationMixerPlayable mixer;
-            private List<PlayableState> states = new List<PlayableState>();
-
-            private Playable() { }
-            public static Playable Create(RunnerGraph graph, AnimationClip runnerClip)
+            public static AnimationPlayable Create(RunnerGraph graph, AnimationClip runnerClip)
             {
-                Playable playable = null;
-                foreach (var p in playables)
-                {
-                    if (p.graph == graph && p.output.GetTarget() == runnerClip.Data.animator)
-                    {
-                        playable = p;
-                        break;
-                    }
-                }
-                if (playable == null)
-                {
-                    playable = new Playable();
-                    playable.graph = graph;
-                    playable.output = AnimationPlayableOutput.Create(graph.playableGraph, runnerClip.Data.animator.name, runnerClip.Data.animator);
-                    playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
-                    playable.output.SetSourcePlayable(playable.mixer);
-                    playables.Add(playable);
-                }
+                var playable = RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip);
+                playable.graph = graph;
+                playable.output = AnimationPlayableOutput.Create(graph.playableGraph, runnerClip.Data.animator.name, runnerClip.Data.animator);
+                playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
+                playable.output.SetSourcePlayable(playable.mixer);
+
                 var state = new PlayableState();
-                state.frame = runnerClip.Data.from;
+                state.time = runnerClip.Data.from;
                 state.weight = 0;
                 state.clip = runnerClip;
                 state.playable = AnimationClipPlayable.Create(graph.playableGraph, runnerClip.Data.animation);
-                state.playable.SetTime(state.frame / runnerClip.Data.animation.frameRate);
+                state.playable.SetTime(state.time / runnerClip.Data.animation.frameRate);
 
                 playable.states.Add(state);
                 playable.mixer.AddInput(state.playable, 0, state.weight);
 
                 return playable;
             }
-
-            public void SetFrame(AnimationClip runnerClip, float frame, bool playableStateChanged, bool exitingChanged)
-            {
-                foreach (var state in states)
-                {
-                    if (state.clip == runnerClip)
-                    {
-                        var lastFrame = state.frame;
-                        state.frame = frame;
-                        state.playable.SetTime(frame / runnerClip.Data.animation.frameRate);
-
-                        var desiredWeightDirty = playableStateChanged || exitingChanged;
-                        if (desiredWeightDirty)
-                            UpdateWeightTo();
-
-                        if (desiredWeightDirty || state.transition != -1)
-                        {
-                            var deltaFrame = frame - lastFrame;
-                            if (deltaFrame < 0) deltaFrame = frame + runnerClip.Data.to - lastFrame;
-                            UpdateWeight(deltaFrame);
-                        }
-                        return;
-                    }
-                }
-            }
-            private void UpdateWeightTo()
-            {
-                const float LeftLimitWeight = -1000, RightLimitWeight = 1000;
-                bool hasRightLimit = false, hasRightCount = false, hasUpLeftLimit = false;
-                for (var index = 0; index < states.Count; index++)
-                {
-                    var state = states[index];
-                    var weightTo = state.clip.exiting || state.clip.State != RunState.Running ? 0 : state.clip.Data.weight;
-                    if (weightTo != 0)
-                    {
-                        if (weightTo >= RightLimitWeight)
-                        {
-                            hasRightLimit = true;
-                            break;
-                        }
-                        if (weightTo > 0)
-                            hasRightCount = true;
-                        else if (weightTo > LeftLimitWeight)
-                            hasUpLeftLimit = true;
-                    }
-                }
-                for (var index = 0; index < states.Count; index++)
-                {
-                    var state = states[index];
-                    var weightTo = state.clip.exiting || state.clip.State != RunState.Running ? 0 : state.clip.Data.weight;
-                    if (weightTo != 0)
-                    {
-                        if (hasRightLimit)
-                            weightTo = weightTo >= RightLimitWeight ? 1 : 0;
-                        else if (hasRightCount)
-                            weightTo = weightTo > 0 ? weightTo : 0;
-                        else if (hasUpLeftLimit)
-                            weightTo = weightTo <= LeftLimitWeight ? 0 : weightTo + RightLimitWeight;
-                        else
-                            weightTo = 1;
-                    }
-                    state.weightTo = weightTo;
-                }
-            }
-            /// <summary>
-            /// 节点预设值为0, 节点权重也为0, 且节点预设值越高, 节点权重越高
-            /// 当有节点预设值>0时, <0的预设值节点权重都为0;
-            /// 当有节点预设值≥1000时, 其他<1000节点权重都为0;
-            /// 当有节点预设值≤-1000时, 节点权重为0;
-            /// 每个节点权重以渐变形式达到预设值平衡值, 平衡值和恒等于1。
-            /// 节点权重渐变时长固定1s, 当期望权重发生变化时, 重置渐变
-            /// </summary>
-            private void UpdateWeight(float deltaFrame)
-            {
-                float weightTotal = 0;
-                for (var index = 0; index < states.Count; index++)
-                {
-                    var state = states[index];
-                    var weight = state.weightTo;
-                    if (state.clip.Data.transition > 0 && state.weight != state.weightTo && state.transition == -1)
-                    {
-                        state.transition = 0;
-                        state.weightFrom = state.weight;
-                    }
-                    if (state.transition != -1)
-                    {
-                        state.transition += deltaFrame;
-                        weight = Mathf.Lerp(state.weightFrom, state.weightTo, state.transition / state.clip.Data.transition);
-                        if (state.transition >= state.clip.Data.transition) state.transition = -1;
-                    }
-
-                    weightTotal += weight;
-                    state.weight = weight;
-                }
-
-                for (var index = 0; index < states.Count; index++)
-                {
-                    var weight = weightTotal > 0 ? states[index].weight / weightTotal : 0f;
-                    mixer.SetInputWeight(index, weight);
-                    // Debug.Log(Time.frameCount + ": SetInputWeight: " + index + ", " + weight + ", " + states[index].weight + ", " + states[index].weightTo);
-                }
-            }
-            private void DestroyImmediate(AnimationClip runnerClip)
-            {
-                for (var index = 0; index < states.Count; index++)
-                {
-                    var state = states[index];
-                    if (state.clip == runnerClip)
-                    {
-                        states.RemoveAt(index);
-                        graph.playableGraph.DestroyPlayable(state.playable);
-
-                        if (states.Count == 0)
-                        {
-                            graph.playableGraph.DestroyPlayable(mixer);
-                            graph.playableGraph.DestroyOutput(output);
-                            playables.Remove(this);
-                            return;
-                        }
-
-                        for (; index < states.Count; index++)
-                        {
-                            mixer.DisconnectInput(index + 1);
-                            mixer.ConnectInput(index, states[index].playable, 0);
-                        }
-                        mixer.SetInputCount(states.Count);
-                        UpdateWeightTo();
-                        UpdateWeight(0);
-                        return;
-                    }
-                }
-            }
-            public void Destroy(AnimationClip runnerClip) => graph.Clean(() => DestroyImmediate(runnerClip));
-
-            private class PlayableState
-            {
-                public float frame;
-                public float transition;
-                public float weight;
-                public float weightFrom;
-                public float weightTo;
-                public AnimationClip clip;
-                public AnimationClipPlayable playable;
-            }
+            protected override void SetTime(PlayableState state, float time) => state.playable.SetTime(time / state.clip.Data.animation.frameRate);
         }
     }
 
@@ -1050,12 +1080,17 @@ public class Runner : MonoBehaviour
     {
         public AudioSource audioSource;
         public AudioClip audioClip;
+        public bool loop;
 
         [Min(0)]
         public float from = 0;
         [Min(0)]
         public float to = float.PositiveInfinity;
-        public bool loop;
+        [Min(0)]
+        public float transition = 0;
+        [Range(-1000, 1000)]
+        public float weight = 1;
+
         public override bool Verify()
         {
             if (!audioSource || !audioClip) return false;
@@ -1067,9 +1102,16 @@ public class Runner : MonoBehaviour
         }
         public override RunnerClip CreateClip() => new SoundClip(this);
     }
-    private class SoundClip : RunnerClip<SoundClipData>
+    private class SoundClip : RunnerClip<SoundClipData>, IMixRunnerClip
     {
-        private Playable playable;
+        public UnityEngine.Object Target => Data.audioSource;
+        public float From => Data.from;
+        public float To => Data.to;
+        public float Weight => Data.weight;
+        public float Transition => Data.transition;
+        public bool Exiting { get; private set; }
+
+        private SoundPlayable playable;
 
         public SoundClip(SoundClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
@@ -1077,53 +1119,55 @@ public class Runner : MonoBehaviour
             var res = base.Run(graph);
             if (res)
             {
-                playable = Playable.Create(graph, this);
+                playable = SoundPlayable.Create(graph, this);
             }
             return res;
         }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
+            var lastState = State;
+            var lastExiting = Exiting;
             var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0 || playable == null) return subProgress;
 
-            playable.SetTime(Data.from + (Data.loop ? Elapsed % (Data.to - Data.from) : Elapsed));
+            Exiting = !Data.loop && Elapsed + Data.transition > Data.to;
+            var time = Mathf.Min(Data.from + (Data.loop ? Elapsed % (Data.to - Data.from) : Elapsed), Data.to);
+            playable.SetTime(this, time, State != lastState, Exiting != lastExiting);
             return subProgress;
         }
         public override void Destroy()
         {
             if (playable != null)
             {
-                playable.Destroy();
+                playable.Destroy(this);
                 playable = null;
             }
             base.Destroy();
         }
-
-        private class Playable
+        private class SoundPlayable : RunnerPlayable<SoundClip>
         {
-            private RunnerGraph graph;
-            private AudioPlayableOutput output;
-            private AudioClipPlayable playable;
-
-            private Playable() { }
-            public static Playable Create(RunnerGraph graph, SoundClip runnerClip)
+            public static SoundPlayable Create(RunnerGraph graph, SoundClip runnerClip)
             {
-                if (!runnerClip.Data.audioSource) return null;
-
-                var playable = new Playable();
+                var playable = RunnerPlayable.Create<SoundPlayable>(graph, runnerClip);
+                playable = new SoundPlayable();
                 playable.graph = graph;
                 playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
-                playable.playable = AudioClipPlayable.Create(graph.playableGraph, runnerClip.Data.audioClip, runnerClip.Data.loop);
-                playable.output.SetSourcePlayable(playable.playable);
+                playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
+                playable.output.SetSourcePlayable(playable.mixer);
+                playables.Add(playable);
+
+                var state = new PlayableState();
+                state.time = runnerClip.Data.from;
+                state.weight = 0;
+                state.clip = runnerClip;
+                state.playable = AudioClipPlayable.Create(graph.playableGraph, runnerClip.Data.audioClip, runnerClip.Data.loop);
+                state.playable.SetTime(state.time);
+
+                playable.states.Add(state);
+                playable.mixer.AddInput(state.playable, 0, state.weight);
+
                 return playable;
             }
-            public void SetTime(float time) => playable.SetTime(time);
-            private void DestroyImmediate()
-            {
-                graph.playableGraph.DestroyPlayable(playable);
-                graph.playableGraph.DestroyOutput(output);
-            }
-            public void Destroy() => graph.Clean(() => DestroyImmediate());
         }
     }
     private class Navigation
