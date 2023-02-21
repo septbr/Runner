@@ -359,6 +359,8 @@ public class Runner : MonoBehaviour
         public static readonly EaseFunction InOutCirc = t => (t *= 2f) < 1f ? -0.5f * ((float)Math.Sqrt((double)(1f - t * t)) - 1f) : 0.5f * ((float)Math.Sqrt((double)(1f - (t -= 2f) * t)) + 1f);
     }
 
+    public const float MinWeight = -1000, MaxWeight = 1000;
+
     [Serializable]
     public class RunnerClipData
     {
@@ -382,7 +384,6 @@ public class Runner : MonoBehaviour
 
         private void UpdateWeightTo()
         {
-            const float LeftLimitWeight = -1000, RightLimitWeight = 1000;
             bool hasRightLimit = false, hasRightCount = false, hasUpLeftLimit = false;
             for (var index = 0; index < states.Count; index++)
             {
@@ -390,14 +391,14 @@ public class Runner : MonoBehaviour
                 var weightTo = state.clip.Exiting || state.clip.State != RunnerClip.RunState.Running ? 0 : state.clip.Weight;
                 if (weightTo != 0)
                 {
-                    if (weightTo >= RightLimitWeight)
+                    if (weightTo >= MaxWeight)
                     {
                         hasRightLimit = true;
                         break;
                     }
                     if (weightTo > 0)
                         hasRightCount = true;
-                    else if (weightTo > LeftLimitWeight)
+                    else if (weightTo > MinWeight)
                         hasUpLeftLimit = true;
                 }
             }
@@ -408,11 +409,11 @@ public class Runner : MonoBehaviour
                 if (weightTo != 0)
                 {
                     if (hasRightLimit)
-                        weightTo = weightTo >= RightLimitWeight ? 1 : 0;
+                        weightTo = weightTo >= MaxWeight ? 1 : 0;
                     else if (hasRightCount)
                         weightTo = weightTo > 0 ? weightTo : 0;
                     else if (hasUpLeftLimit)
-                        weightTo = weightTo <= LeftLimitWeight ? 0 : weightTo + RightLimitWeight;
+                        weightTo = weightTo <= MinWeight ? 0 : weightTo + MaxWeight;
                     else
                         weightTo = 1;
                 }
@@ -817,7 +818,7 @@ public class Runner : MonoBehaviour
         public float to = float.PositiveInfinity;
         [Min(0)]
         public float transition = 5;
-        [Range(-1000, 1000)]
+        [Range(MinWeight, MaxWeight)]
         public float weight = 1;
 
         public override bool Verify()
@@ -829,7 +830,7 @@ public class Runner : MonoBehaviour
             from = Mathf.Clamp(from, 0, frameCount);
             to = Mathf.Clamp(to, from, frameCount);
             transition = Mathf.Clamp(transition, 0, to - from);
-            weight = weight == 0 ? 1 : weight;
+            weight = weight == 0 ? 1 : Mathf.Clamp(weight, MinWeight, MaxWeight);
 
             frameSpeeds.RemoveAll(x => x.value == 0 || x.frame < 0 || x.frame >= frameCount || (x.frame == 0 && x.value == 1));
             frameSpeeds.Sort((x, y) => x.frame.CompareTo(y.frame));
@@ -1174,7 +1175,7 @@ public class Runner : MonoBehaviour
         public float to = float.PositiveInfinity;
         [Min(0)]
         public float transition = 0;
-        [Range(-1000, 1000)]
+        [Range(MinWeight, MaxWeight)]
         public float weight = 1;
 
         public override bool Verify()
@@ -1182,6 +1183,7 @@ public class Runner : MonoBehaviour
             if (!audioSource || !audioClip) return false;
             from = Mathf.Max(from, 0);
             to = Mathf.Min(to, audioClip.samples / audioClip.frequency);
+            weight = weight == 0 ? 1: Mathf.Clamp(weight, MinWeight, MaxWeight);
 
             duration = loop ? float.PositiveInfinity : (to - from);
             return base.Verify();
