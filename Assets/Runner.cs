@@ -45,7 +45,6 @@ public class Runner : MonoBehaviour
             from = from,
             to = to,
         };
-
         return Run(delay, data);
     }
     public RunnerClip Move(float delay, Transform target, Vector3[] path, float duration)
@@ -57,7 +56,6 @@ public class Runner : MonoBehaviour
         };
         foreach (var position in path)
             data.path.Add(new MoveClipData.Place { position = position });
-
         return Run(delay, data);
     }
     public RunnerClip Rotate(float delay, Transform target, Vector3[] path, float duration)
@@ -660,7 +658,6 @@ public class Runner : MonoBehaviour
                 from = from,
                 to = to,
             };
-
             Add(delay, data);
             return data;
         }
@@ -673,7 +670,6 @@ public class Runner : MonoBehaviour
             };
             foreach (var position in path)
                 data.path.Add(new MoveClipData.Place { position = position });
-
             Add(delay, data);
             return data;
         }
@@ -1539,6 +1535,17 @@ public class Runner : MonoBehaviour
 
             var path = new List<Vector3>(Data.path);
             path.Insert(0, Data.isLocal ? Data.target.localEulerAngles : Data.target.eulerAngles);
+            for (var index = 0; index < path.Count; index++)
+            {
+                var curr = path[index];
+                curr.x %= 360;
+                curr.x = curr.x > 180 ? curr.x - 360 : (curr.x < -180 ? curr.x + 360 : curr.x);
+                curr.y %= 360;
+                curr.y = curr.y > 180 ? curr.y - 360 : (curr.y < -180 ? curr.y + 360 : curr.y);
+                curr.z %= 360;
+                curr.z = curr.z > 180 ? curr.z - 360 : (curr.z < -180 ? curr.z + 360 : curr.z);
+                path[index] = curr;
+            }
             navigation = new Navigation(path, Data.isCurve);
             return true;
         }
