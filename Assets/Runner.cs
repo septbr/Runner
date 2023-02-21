@@ -12,7 +12,7 @@ public class Runner : MonoBehaviour
     private RunnerDirector director;
 
     private void Awake() => director = RunnerDirector.Create(name);
-    private void Update() => director.Evaluate(Time.deltaTime * Speed);
+    private void Update() => director.graph.Evaluate(Time.deltaTime * Speed);
     private void OnDestroy() => director.Destroy();
 
     public RunnerClip Run(float delay, RunnerClipData data) => director.Run(delay, data);
@@ -36,9 +36,9 @@ public class Runner : MonoBehaviour
         };
         return Run(delay, data);
     }
-    public RunnerClip Sound(float delay, AudioSource source, AudioClip clip, float from = 0, float to = float.PositiveInfinity)
+    public RunnerClip Audio(float delay, AudioSource source, UnityEngine.AudioClip clip, float from = 0, float to = float.PositiveInfinity)
     {
-        var data = new SoundClipData
+        var data = new AudioClipData
         {
             audioSource = source,
             audioClip = clip,
@@ -101,11 +101,27 @@ public class Runner : MonoBehaviour
         return Run(delay, data);
     }
 
+    public bool ContainsAnimationState(Animator animator, string state, params string[] states) => director.graph.ContainsState<AnimationClip>(animator, state, states);
+    public bool ContainsAnimationState(Animator animator, UnityEngine.AnimationClip state, params UnityEngine.AnimationClip[] states) => director.graph.ContainsState<AnimationClip>(animator, state, states);
+    public bool ContainsAudioState(AudioSource audioSource, string state, params string[] states) => director.graph.ContainsState<AudioClip>(audioSource, state, states);
+    public bool ContainsAudioState(AudioSource audioSource, UnityEngine.AudioClip state, params UnityEngine.AudioClip[] states) => director.graph.ContainsState<AudioClip>(audioSource, state, states);
+
     public class RunnerGraph
     {
         public readonly PlayableGraph playableGraph;
         private RunnerGraph(string name) => playableGraph = PlayableGraph.Create(name);
         public static RunnerGraph Create(string name) => new RunnerGraph(name);
+
+        public void Evaluate(float time)
+        {
+            playableGraph.Evaluate(time);
+            CleanImmediate();
+        }
+        public void Destroy()
+        {
+            playableGraph.Destroy();
+            CleanImmediate();
+        }
 
         private List<Tuple<float, Action>> invokers = new List<Tuple<float, Action>>();
         public void Invoke(float progress, Action invoke)
@@ -151,6 +167,12 @@ public class Runner : MonoBehaviour
                 cleanup();
             cleanups.Clear();
 
+            CleanPlayablesImmediate();
+        }
+
+        private List<RunnerPlayable> playables = new List<RunnerPlayable>();
+        public void CleanPlayablesImmediate()
+        {
             for (int index = 0; index < playables.Count; index++)
             {
                 var playable = playables[index];
@@ -161,8 +183,24 @@ public class Runner : MonoBehaviour
                 }
             }
         }
-
-        private List<RunnerPlayable> playables = new List<RunnerPlayable>();
+        public bool ContainsState<T>(UnityEngine.Object target, string state, params string[] states) where T : RunnerClip, IMixRunnerClip
+        {
+            foreach (var playable in playables)
+            {
+                if (playable.target == target && playable is RunnerPlayable<T> && playable.ContainsState(state, states))
+                    return true;
+            }
+            return false;
+        }
+        public bool ContainsState<T>(UnityEngine.Object target, UnityEngine.Object state, params UnityEngine.Object[] states) where T : RunnerClip, IMixRunnerClip
+        {
+            foreach (var playable in playables)
+            {
+                if (playable.target == target && playable is RunnerPlayable<T> && playable.ContainsState(state, states))
+                    return true;
+            }
+            return false;
+        }
 
         public abstract class RunnerPlayable
         {
@@ -172,6 +210,8 @@ public class Runner : MonoBehaviour
             protected Playable mixer;
 
             public bool IsValid() => target;
+            public abstract bool ContainsState(string state, params string[] states);
+            public abstract bool ContainsState(UnityEngine.Object state, params UnityEngine.Object[] states);
             public void DestroyImmediate()
             {
                 for (int index = 0, inputCount = mixer.GetInputCount(); index < inputCount; index++)
@@ -184,6 +224,7 @@ public class Runner : MonoBehaviour
                 graph.playableGraph.DestroyOutput(output);
                 target = null;
             }
+
             public static T Create<T>(RunnerGraph graph, UnityEngine.Object target) where T : RunnerPlayable, new()
             {
                 T playable = null;
@@ -209,7 +250,7 @@ public class Runner : MonoBehaviour
 
     private class RunnerDirector : PlayableBehaviour
     {
-        private RunnerGraph graph;
+        public RunnerGraph graph { get; private set; }
         private List<Node> nodes = new List<Node>();
 
         public static RunnerDirector Create(string name)
@@ -238,17 +279,15 @@ public class Runner : MonoBehaviour
             return clip;
         }
 
-        public void Evaluate(float time)
-        {
-            graph.playableGraph.Evaluate(time);
-            graph.CleanImmediate();
-        }
         public void Destroy()
         {
             foreach (var node in nodes)
                 node.clip.Destroy();
             nodes.Clear();
-            graph.playableGraph.Destroy();
+            nodes = null;
+
+            graph.Destroy();
+            graph = null;
         }
 
         public override void PrepareFrame(Playable playable, FrameData info)
@@ -335,7 +374,7 @@ public class Runner : MonoBehaviour
         public virtual RunnerClip CreateClip() => new RunnerClip(this);
     }
 
-    private class RunnerPlayable<T> : RunnerGraph.RunnerPlayable where T : RunnerClip, IMixRunnerClip
+    private abstract class RunnerPlayable<T> : RunnerGraph.RunnerPlayable where T : RunnerClip, IMixRunnerClip
     {
         protected List<PlayableState> states = new List<PlayableState>();
 
@@ -477,7 +516,7 @@ public class Runner : MonoBehaviour
             public Playable playable;
         }
     }
-    private interface IMixRunnerClip
+    public interface IMixRunnerClip
     {
         UnityEngine.Object Target { get; }
         float From { get; }
@@ -608,9 +647,9 @@ public class Runner : MonoBehaviour
             Add(delay, data);
             return data;
         }
-        public SoundClipData Sound(float delay, AudioSource source, AudioClip clip, float from = 0, float to = float.PositiveInfinity)
+        public AudioClipData Audio(float delay, AudioSource source, UnityEngine.AudioClip clip, float from = 0, float to = float.PositiveInfinity)
         {
-            var data = new SoundClipData
+            var data = new AudioClipData
             {
                 audioSource = source,
                 audioClip = clip,
@@ -923,6 +962,40 @@ public class Runner : MonoBehaviour
 
         private class AnimationPlayable : RunnerPlayable<AnimationClip>
         {
+            public override bool ContainsState(string state, params string[] states)
+            {
+                var names = new List<string>(states);
+                names.Add(state);
+
+                var res = false;
+                foreach (var name in names)
+                {
+                    foreach (var st in this.states)
+                    {
+                        res = st.clip.Data.animation.name == name;
+                        if (!res) return false;
+                    }
+                }
+                return res;
+            }
+            public override bool ContainsState(UnityEngine.Object state, params UnityEngine.Object[] states)
+            {
+                var objs = new List<UnityEngine.Object>(states);
+                objs.Add(state);
+
+                var res = false;
+                foreach (var obj in objs)
+                {
+                    if (!obj) continue;
+                    foreach (var st in this.states)
+                    {
+                        res = st.clip.Data.animation == obj;
+                        if (!res) return false;
+                    }
+                }
+                return res;
+            }
+            protected override void SetTime(PlayableState state, float time) => state.playable.SetTime(time / state.clip.Data.animation.frameRate);
             public static AnimationPlayable Create(RunnerGraph graph, AnimationClip runnerClip)
             {
                 var playable = RunnerGraph.RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip.Target);
@@ -942,7 +1015,6 @@ public class Runner : MonoBehaviour
 
                 return playable;
             }
-            protected override void SetTime(PlayableState state, float time) => state.playable.SetTime(time / state.clip.Data.animation.frameRate);
         }
     }
 
@@ -1088,10 +1160,10 @@ public class Runner : MonoBehaviour
     }
 
     [Serializable]
-    public class SoundClipData : RunnerClipData
+    public class AudioClipData : RunnerClipData
     {
         public AudioSource audioSource;
-        public AudioClip audioClip;
+        public UnityEngine.AudioClip audioClip;
         public bool loop;
 
         [Min(0)]
@@ -1112,9 +1184,9 @@ public class Runner : MonoBehaviour
             duration = loop ? float.PositiveInfinity : (to - from);
             return base.Verify();
         }
-        public override RunnerClip CreateClip() => new SoundClip(this);
+        public override RunnerClip CreateClip() => new AudioClip(this);
     }
-    private class SoundClip : RunnerClip<SoundClipData>, IMixRunnerClip
+    private class AudioClip : RunnerClip<AudioClipData>, IMixRunnerClip
     {
         public UnityEngine.Object Target => Data.audioSource;
         public float From => Data.from;
@@ -1123,15 +1195,15 @@ public class Runner : MonoBehaviour
         public float Transition => Data.transition;
         public bool Exiting { get; private set; }
 
-        private SoundPlayable playable;
+        private AudioPlayable playable;
 
-        public SoundClip(SoundClipData data) : base(data) { }
+        public AudioClip(AudioClipData data) : base(data) { }
         protected override bool Run(RunnerGraph graph)
         {
             var res = base.Run(graph);
             if (res)
             {
-                playable = SoundPlayable.Create(graph, this);
+                playable = AudioPlayable.Create(graph, this);
             }
             return res;
         }
@@ -1156,11 +1228,44 @@ public class Runner : MonoBehaviour
             }
             base.Destroy();
         }
-        private class SoundPlayable : RunnerPlayable<SoundClip>
+        private class AudioPlayable : RunnerPlayable<AudioClip>
         {
-            public static SoundPlayable Create(RunnerGraph graph, SoundClip runnerClip)
+            public override bool ContainsState(string state, params string[] states)
             {
-                var playable = RunnerGraph.RunnerPlayable.Create<SoundPlayable>(graph, runnerClip.Target);
+                var names = new List<string>(states);
+                names.Add(state);
+
+                var res = false;
+                foreach (var name in names)
+                {
+                    foreach (var st in this.states)
+                    {
+                        res = st.clip.Data.audioClip.name == name;
+                        if (!res) return false;
+                    }
+                }
+                return res;
+            }
+            public override bool ContainsState(UnityEngine.Object state, params UnityEngine.Object[] states)
+            {
+                var objs = new List<UnityEngine.Object>(states);
+                objs.Add(state);
+
+                var res = false;
+                foreach (var obj in objs)
+                {
+                    if (!obj) continue;
+                    foreach (var st in this.states)
+                    {
+                        res = st.clip.Data.audioClip == obj;
+                        if (!res) return false;
+                    }
+                }
+                return res;
+            }
+            public static AudioPlayable Create(RunnerGraph graph, AudioClip runnerClip)
+            {
+                var playable = RunnerGraph.RunnerPlayable.Create<AudioPlayable>(graph, runnerClip.Target);
                 playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
                 playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
                 playable.output.SetSourcePlayable(playable.mixer);

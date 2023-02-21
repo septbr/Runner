@@ -78,7 +78,7 @@ public class RunnerTest : MonoBehaviour
     public Runner.ActiveClipData data2;
     public float data3Delay = 0;
     [SerializeField]
-    public Runner.SoundClipData data3;
+    public Runner.AudioClipData data3;
     public float data4Delay = 0;
     [SerializeField]
     public Runner.MoveClipData data4;
