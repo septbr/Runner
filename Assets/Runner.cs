@@ -148,10 +148,62 @@ public class Runner : MonoBehaviour
         public void CleanImmediate()
         {
             foreach (var cleanup in cleanups)
-            {
                 cleanup();
-            }
             cleanups.Clear();
+
+            for (int index = 0; index < playables.Count; index++)
+            {
+                var playable = playables[index];
+                if (!playable.IsValid())
+                {
+                    playable.DestroyImmediate();
+                    playables.RemoveAt(index--);
+                }
+            }
+        }
+
+        private List<RunnerPlayable> playables = new List<RunnerPlayable>();
+
+        public abstract class RunnerPlayable
+        {
+            public RunnerGraph graph { get; private set; }
+            public UnityEngine.Object target { get; private set; }
+            protected PlayableOutput output;
+            protected Playable mixer;
+
+            public bool IsValid() => target;
+            public void DestroyImmediate()
+            {
+                for (int index = 0, inputCount = mixer.GetInputCount(); index < inputCount; index++)
+                {
+                    var input = mixer.GetInput(index);
+                    if (input.IsValid())
+                        graph.playableGraph.DestroyPlayable(input);
+                }
+                graph.playableGraph.DestroyPlayable(mixer);
+                graph.playableGraph.DestroyOutput(output);
+                target = null;
+            }
+            public static T Create<T>(RunnerGraph graph, UnityEngine.Object target) where T : RunnerPlayable, new()
+            {
+                T playable = null;
+                foreach (var p in graph.playables)
+                {
+                    if (p is T tp && p.graph == graph && p.target == target)
+                    {
+                        playable = tp;
+                        break;
+                    }
+                }
+                if (playable == null)
+                {
+                    playable = new T();
+                    playable.graph = graph;
+                    playable.target = target;
+                    graph.playables.Add(playable);
+                }
+                return playable;
+            }
         }
     }
 
@@ -238,10 +290,6 @@ public class Runner : MonoBehaviour
                 => Scheduler.Running(clip, graph, deltaTime, progress);
         }
     }
-    public interface IInvoker
-    {
-        void Invoke(float progress, Action handle);
-    }
 
     public delegate float EaseFunction(float t);
     public static class Ease
@@ -286,36 +334,8 @@ public class Runner : MonoBehaviour
         }
         public virtual RunnerClip CreateClip() => new RunnerClip(this);
     }
-    private abstract class RunnerPlayable
-    {
-        protected static List<RunnerPlayable> playables = new List<RunnerPlayable>();
-        protected RunnerGraph graph;
-        protected UnityEngine.Object target;
-        protected PlayableOutput output;
-        protected Playable mixer;
 
-        protected abstract void DestroyImmediate(IMixRunnerClip runnerClip);
-        public abstract void Destroy(IMixRunnerClip runnerClip);
-        public static T Create<T>(RunnerGraph graph, IMixRunnerClip runnerClip) where T : RunnerPlayable, new()
-        {
-            T playable = null;
-            foreach (var p in playables)
-            {
-                if (p is T tp && p.graph == graph && p.target == runnerClip.Target)
-                {
-                    playable = tp;
-                    break;
-                }
-            }
-            if (playable == null)
-            {
-                playable = new T();
-                playables.Add(playable);
-            }
-            return playable;
-        }
-    }
-    private class RunnerPlayable<T> : RunnerPlayable where T : RunnerClip, IMixRunnerClip
+    private class RunnerPlayable<T> : RunnerGraph.RunnerPlayable where T : RunnerClip, IMixRunnerClip
     {
         protected List<PlayableState> states = new List<PlayableState>();
 
@@ -421,7 +441,8 @@ public class Runner : MonoBehaviour
                 }
             }
         }
-        protected override void DestroyImmediate(IMixRunnerClip runnerClip)
+
+        protected void DestroyImmediate(IMixRunnerClip runnerClip)
         {
             for (var index = 0; index < states.Count; index++)
             {
@@ -430,14 +451,6 @@ public class Runner : MonoBehaviour
                 {
                     states.RemoveAt(index);
                     graph.playableGraph.DestroyPlayable(state.playable);
-
-                    if (states.Count == 0)
-                    {
-                        graph.playableGraph.DestroyPlayable(mixer);
-                        graph.playableGraph.DestroyOutput(output);
-                        playables.Remove(this);
-                        return;
-                    }
 
                     for (; index < states.Count; index++)
                     {
@@ -451,7 +464,7 @@ public class Runner : MonoBehaviour
                 }
             }
         }
-        public override void Destroy(IMixRunnerClip runnerClip) => graph.Clean(() => DestroyImmediate(runnerClip));
+        public void Destroy(IMixRunnerClip runnerClip) => graph.Clean(() => DestroyImmediate(runnerClip));
 
         protected class PlayableState
         {
@@ -912,8 +925,7 @@ public class Runner : MonoBehaviour
         {
             public static AnimationPlayable Create(RunnerGraph graph, AnimationClip runnerClip)
             {
-                var playable = RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip);
-                playable.graph = graph;
+                var playable = RunnerGraph.RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip.Target);
                 playable.output = AnimationPlayableOutput.Create(graph.playableGraph, runnerClip.Data.animator.name, runnerClip.Data.animator);
                 playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
                 playable.output.SetSourcePlayable(playable.mixer);
@@ -1148,13 +1160,10 @@ public class Runner : MonoBehaviour
         {
             public static SoundPlayable Create(RunnerGraph graph, SoundClip runnerClip)
             {
-                var playable = RunnerPlayable.Create<SoundPlayable>(graph, runnerClip);
-                playable = new SoundPlayable();
-                playable.graph = graph;
+                var playable = RunnerGraph.RunnerPlayable.Create<SoundPlayable>(graph, runnerClip.Target);
                 playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
                 playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
                 playable.output.SetSourcePlayable(playable.mixer);
-                playables.Add(playable);
 
                 var state = new PlayableState();
                 state.time = runnerClip.Data.from;
