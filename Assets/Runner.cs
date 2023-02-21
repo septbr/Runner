@@ -119,8 +119,8 @@ public class Runner : MonoBehaviour
         }
         public void Destroy()
         {
-            playableGraph.Destroy();
             CleanImmediate();
+            playableGraph.Destroy();
         }
 
         private List<Tuple<float, Action>> invokers = new List<Tuple<float, Action>>();
@@ -209,28 +209,30 @@ public class Runner : MonoBehaviour
             protected PlayableOutput output;
             protected Playable mixer;
 
-            public bool IsValid() => target;
+            public bool IsValid() => target && mixer.IsValid();
             public abstract bool ContainsState(string state, params string[] states);
             public abstract bool ContainsState(UnityEngine.Object state, params UnityEngine.Object[] states);
             public void DestroyImmediate()
             {
-                for (int index = 0, inputCount = mixer.GetInputCount(); index < inputCount; index++)
+                if (mixer.IsValid())
                 {
-                    var input = mixer.GetInput(index);
-                    if (input.IsValid())
-                        graph.playableGraph.DestroyPlayable(input);
+                    for (int index = 0, inputCount = mixer.GetInputCount(); index < inputCount; index++)
+                    {
+                        var input = mixer.GetInput(index);
+                        if (input.IsValid())
+                            graph.playableGraph.DestroyPlayable(input);
+                    }
+                    graph.playableGraph.DestroyPlayable(mixer);
+                    graph.playableGraph.DestroyOutput(output);
                 }
-                graph.playableGraph.DestroyPlayable(mixer);
-                graph.playableGraph.DestroyOutput(output);
-                target = null;
             }
 
-            public static T Create<T>(RunnerGraph graph, UnityEngine.Object target) where T : RunnerPlayable, new()
+            public static T Create<T>(RunnerGraph graph, UnityEngine.Object target, Action<T> connect) where T : RunnerPlayable, new()
             {
                 T playable = null;
                 foreach (var p in graph.playables)
                 {
-                    if (p is T tp && p.graph == graph && p.target == target)
+                    if (p is T tp && p.target == target)
                     {
                         playable = tp;
                         break;
@@ -241,6 +243,8 @@ public class Runner : MonoBehaviour
                     playable = new T();
                     playable.graph = graph;
                     playable.target = target;
+
+                    connect(playable);
                     graph.playables.Add(playable);
                 }
                 return playable;
@@ -941,7 +945,7 @@ public class Runner : MonoBehaviour
             var lastState = State;
             var lastExiting = Exiting;
             var subProgress = base.Running(graph, deltaTime, progress);
-            if (subProgress < 0 || playable == null) return subProgress;
+            if (subProgress < 0 || playable == null || !playable.IsValid()) return subProgress;
 
             var frame = Data.To(Data.from, Data.ending == AnimationClipData.Ending.Loop ? Elapsed % cycleDuration : Elapsed);
             frame = Mathf.Min(frame, Data.to);
@@ -998,10 +1002,12 @@ public class Runner : MonoBehaviour
             protected override void SetTime(PlayableState state, float time) => state.playable.SetTime(time / state.clip.Data.animation.frameRate);
             public static AnimationPlayable Create(RunnerGraph graph, AnimationClip runnerClip)
             {
-                var playable = RunnerGraph.RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip.Target);
-                playable.output = AnimationPlayableOutput.Create(graph.playableGraph, runnerClip.Data.animator.name, runnerClip.Data.animator);
-                playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
-                playable.output.SetSourcePlayable(playable.mixer);
+                var playable = RunnerGraph.RunnerPlayable.Create<AnimationPlayable>(graph, runnerClip.Target, playable =>
+                {
+                    playable.output = AnimationPlayableOutput.Create(graph.playableGraph, runnerClip.Data.animator.name, runnerClip.Data.animator);
+                    playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
+                    playable.output.SetSourcePlayable(playable.mixer);
+                });
 
                 var state = new PlayableState();
                 state.time = runnerClip.Data.from;
@@ -1212,7 +1218,7 @@ public class Runner : MonoBehaviour
             var lastState = State;
             var lastExiting = Exiting;
             var subProgress = base.Running(graph, deltaTime, progress);
-            if (subProgress < 0 || playable == null) return subProgress;
+            if (subProgress < 0 || playable == null || !playable.IsValid()) return subProgress;
 
             Exiting = !Data.loop && Elapsed + Data.transition > Data.to;
             var time = Mathf.Min(Data.from + (Data.loop ? Elapsed % (Data.to - Data.from) : Elapsed), Data.to);
@@ -1265,10 +1271,12 @@ public class Runner : MonoBehaviour
             }
             public static AudioPlayable Create(RunnerGraph graph, AudioClip runnerClip)
             {
-                var playable = RunnerGraph.RunnerPlayable.Create<AudioPlayable>(graph, runnerClip.Target);
-                playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
-                playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
-                playable.output.SetSourcePlayable(playable.mixer);
+                var playable = RunnerGraph.RunnerPlayable.Create<AudioPlayable>(graph, runnerClip.Target, playable =>
+                {
+                    playable.output = AudioPlayableOutput.Create(graph.playableGraph, runnerClip.Data.audioSource.name, runnerClip.Data.audioSource);
+                    playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
+                    playable.output.SetSourcePlayable(playable.mixer);
+                });
 
                 var state = new PlayableState();
                 state.time = runnerClip.Data.from;
