@@ -1025,9 +1025,33 @@ public class Runner : MonoBehaviour
     public class ActiveClipData : RunnerClipData
     {
         public UnityEngine.Object target;
+        public Action<bool> activator { get; private set; }
+
         public override bool Verify()
         {
             if (!target) return false;
+
+            if (target is GameObject || target is Transform)
+            {
+                var gameObject = target is GameObject ? (GameObject)target : ((Transform)target).gameObject;
+                activator = enabled => gameObject.SetActive(enabled);
+            }
+            else
+            {
+                if (target is Behaviour behaviour)
+                    activator = enabled => behaviour.enabled = enabled;
+                else if (target is Renderer renderer)
+                    activator = enabled => renderer.enabled = enabled;
+                else if (target is Collider collider)
+                    activator = enabled => collider.enabled = enabled;
+                else
+                {
+                    var propertyInfo = target.GetType().GetProperty("enabled");
+                    if (propertyInfo != null && propertyInfo.CanWrite)
+                        activator = enabled => propertyInfo.SetValue(target, enabled);
+                }
+            }
+            activator?.Invoke(false);
             return base.Verify();
         }
         public override RunnerClip CreateClip() => new ActiveClip(this);
@@ -1037,10 +1061,11 @@ public class Runner : MonoBehaviour
         private bool active = false;
         private ParticleSystemPlayable particleSystemPlayable;
 
-        private Action<bool> _activator;
-        public ActiveClip(ActiveClipData data) : base(data)
+        public ActiveClip(ActiveClipData data) : base(data) { }
+        protected override bool Run(RunnerGraph graph)
         {
-            if (!Data.target) return;
+            var res = base.Run(graph);
+            if (!res || !Data.target) return res;
 
             if (Data.target is GameObject || Data.target is Transform)
             {
@@ -1048,25 +1073,10 @@ public class Runner : MonoBehaviour
                 particleSystemPlayable = new ParticleSystemPlayable(gameObject);
                 if (particleSystemPlayable.ParticleSystemCount == 0)
                     particleSystemPlayable = null;
-
-                _activator = enabled => gameObject.SetActive(enabled);
+                particleSystemPlayable?.Stop();
             }
-            else
-            {
-                if (Data.target is Behaviour behaviour)
-                    _activator = enabled => behaviour.enabled = enabled;
-                else if (Data.target is Renderer renderer)
-                    _activator = enabled => renderer.enabled = enabled;
-                else if (Data.target is Collider collider)
-                    _activator = enabled => collider.enabled = enabled;
-                else
-                {
-                    var propertyInfo = Data.target.GetType().GetProperty("enabled");
-                    if (propertyInfo != null && propertyInfo.CanWrite)
-                        _activator = enabled => propertyInfo.SetValue(Data.target, enabled);
-                }
-            }
-            _activator?.Invoke(active);
+            Data.activator?.Invoke(active);
+            return res;
         }
         protected override float Running(RunnerGraph graph, float deltaTime, float progress)
         {
@@ -1076,7 +1086,7 @@ public class Runner : MonoBehaviour
             if (active != (State == RunState.Running))
             {
                 active = !active;
-                _activator?.Invoke(active);
+                Data.activator?.Invoke(active);
                 particleSystemPlayable?.Stop();
             }
             particleSystemPlayable?.SetTime(Elapsed);
@@ -1183,7 +1193,7 @@ public class Runner : MonoBehaviour
             if (!audioSource || !audioClip) return false;
             from = Mathf.Max(from, 0);
             to = Mathf.Min(to, audioClip.samples / audioClip.frequency);
-            weight = weight == 0 ? 1: Mathf.Clamp(weight, MinWeight, MaxWeight);
+            weight = weight == 0 ? 1 : Mathf.Clamp(weight, MinWeight, MaxWeight);
 
             duration = loop ? float.PositiveInfinity : (to - from);
             return base.Verify();
