@@ -749,7 +749,8 @@ public class Runner : MonoBehaviour
         }
         public override RunnerClip CreateClip() => new GroupClip(this);
 
-        public class Child { public float delay; public RunnerClipData data; }
+        [Serializable]
+        public class Child { public float delay; [SerializeReference] public RunnerClipData data; }
     }
     private class GroupClip : RunnerClip<GroupClipData>
     {
