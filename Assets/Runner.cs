@@ -381,6 +381,15 @@ public class Runner : MonoBehaviour
     private abstract class RunnerPlayable<T> : RunnerGraph.RunnerPlayable where T : RunnerClip, IMixRunnerClip
     {
         protected List<PlayableState> states = new List<PlayableState>();
+        protected PlayableState CreateState(Playable playable, T clip, float time = 0, float weight = 0)
+        {
+            var state = new PlayableState(playable, clip, time);
+            state.playable.Pause();
+            mixer.AddInput(state.playable, 0, state.weight);
+            SetTime(state, state.time);
+            states.Add(state);
+            return state;
+        }
 
         private void UpdateWeightTo()
         {
@@ -510,13 +519,20 @@ public class Runner : MonoBehaviour
 
         protected class PlayableState
         {
-            public float time;
-            public float transition;
-            public float weight;
-            public float weightFrom;
-            public float weightTo;
-            public T clip;
-            public Playable playable;
+            public float time = 0;
+            public float transition = 0;
+            public float weight = 0;
+            public float weightFrom = 0;
+            public float weightTo = 0;
+            public readonly T clip;
+            public readonly Playable playable;
+            public PlayableState(Playable playable, T clip, float time = 0, float weight = 0)
+            {
+                this.playable = playable;
+                this.clip = clip;
+                this.time = time;
+                this.weight = weight;
+            }
         }
     }
     public interface IMixRunnerClip
@@ -817,7 +833,7 @@ public class Runner : MonoBehaviour
         [Min(0)]
         public float to = float.PositiveInfinity;
         [Min(0)]
-        public float transition = 5;
+        public float transition = 10;
         [Range(MinWeight, MaxWeight)]
         public float weight = 1;
 
@@ -1005,17 +1021,7 @@ public class Runner : MonoBehaviour
                     playable.mixer = AnimationMixerPlayable.Create(graph.playableGraph);
                     playable.output.SetSourcePlayable(playable.mixer);
                 });
-
-                var state = new PlayableState();
-                state.time = runnerClip.Data.from;
-                state.weight = 0;
-                state.clip = runnerClip;
-                state.playable = AnimationClipPlayable.Create(graph.playableGraph, runnerClip.Data.animation);
-                state.playable.SetTime(state.time / runnerClip.Data.animation.frameRate);
-
-                playable.states.Add(state);
-                playable.mixer.AddInput(state.playable, 0, state.weight);
-
+                playable.CreateState(AnimationClipPlayable.Create(graph.playableGraph, runnerClip.Data.animation), runnerClip, runnerClip.Data.from);
                 return playable;
             }
         }
@@ -1184,7 +1190,7 @@ public class Runner : MonoBehaviour
         [Min(0)]
         public float to = float.PositiveInfinity;
         [Min(0)]
-        public float transition = 0;
+        public float transition = 0.1f;
         [Range(MinWeight, MaxWeight)]
         public float weight = 1;
 
@@ -1285,17 +1291,7 @@ public class Runner : MonoBehaviour
                     playable.mixer = AudioMixerPlayable.Create(graph.playableGraph);
                     playable.output.SetSourcePlayable(playable.mixer);
                 });
-
-                var state = new PlayableState();
-                state.time = runnerClip.Data.from;
-                state.weight = 0;
-                state.clip = runnerClip;
-                state.playable = AudioClipPlayable.Create(graph.playableGraph, runnerClip.Data.audioClip, runnerClip.Data.loop);
-                state.playable.SetTime(state.time);
-
-                playable.states.Add(state);
-                playable.mixer.AddInput(state.playable, 0, state.weight);
-
+                playable.CreateState(AudioClipPlayable.Create(graph.playableGraph, runnerClip.Data.audioClip, runnerClip.Data.loop), runnerClip, runnerClip.Data.from);
                 return playable;
             }
         }
