@@ -394,9 +394,8 @@ public class Runner : MonoBehaviour
         private void UpdateWeightTo()
         {
             bool hasRightLimit = false, hasRightCount = false, hasUpLeftLimit = false;
-            for (var index = 0; index < states.Count; index++)
+            foreach(var state in states)
             {
-                var state = states[index];
                 var weightTo = state.clip.Exiting || state.clip.State != RunnerClip.RunState.Running ? 0 : state.clip.Weight;
                 if (weightTo != 0)
                 {
@@ -411,9 +410,8 @@ public class Runner : MonoBehaviour
                         hasUpLeftLimit = true;
                 }
             }
-            for (var index = 0; index < states.Count; index++)
+            foreach(var state in states)
             {
-                var state = states[index];
                 var weightTo = state.clip.Exiting || state.clip.State != RunnerClip.RunState.Running ? 0 : state.clip.Weight;
                 if (weightTo != 0)
                 {
@@ -440,9 +438,8 @@ public class Runner : MonoBehaviour
         private void UpdateWeight(float deltaTime)
         {
             float weightTotal = 0;
-            for (var index = 0; index < states.Count; index++)
+            foreach(var state in states)
             {
-                var state = states[index];
                 var weight = state.weightTo;
                 if (state.clip.Transition > 0 && state.weight != state.weightTo && state.transition == -1)
                 {
@@ -776,6 +773,7 @@ public class Runner : MonoBehaviour
             var subProgress = base.Running(graph, deltaTime, progress);
             if (subProgress < 0) return subProgress;
 
+            deltaTime *= Data.speed;
             foreach (var child in children)
             {
                 if (child.clip.State == RunState.Done || child.clip.State == RunState.Destroyed)
